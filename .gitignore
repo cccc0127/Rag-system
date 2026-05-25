@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Env
+.venv/
+venv/
+
+# Models
+model/
+
+# Data
+knowledge_base/
+cache/
+
+# HuggingFace
+.huggingface/
+transformers_cache/
+
+# VSCode
+.vscode/
+
+# Linux
+*.log
+
+*.tar.gz
