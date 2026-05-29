@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 
 
 class PrivacyScorer:
-    """Estimate chunk privacy sensitivity and map it to epsilon/delta."""
-
+    """把一个文本chunk映射成final_sensitivity: 0.0 ~ 1.0，raw_sensitivity_score: 0.1 ~ 10.0
+        privacy_epsilon，dynamic_delta"""
     def __init__(
         self,
         model: str = "valhalla/distilbart-mnli-12-1",
@@ -55,6 +55,7 @@ class PrivacyScorer:
 
     @property
     def classifier(self):
+        # 初始化零样本分类器
         if not self.enable_nlp or self._classifier_failed:
             return None
         if self._classifier is None:
@@ -78,13 +79,14 @@ class PrivacyScorer:
         return _clip(0.1 + 9.9 * final_sensitivity, 0.1, 10.0)
 
     def get_privacy_profile(self, text_chunk: str) -> Dict[str, float]:
-        """Evaluate a chunk once and expose both raw score and legacy DP params."""
+        """对一个语块进行一次评估，并同时显示原始分数和旧版DP参数。"""
         final_sensitivity = self._estimate_sensitivity(text_chunk)
         final_eps = self._sensitivity_to_epsilon(final_sensitivity)
         dynamic_delta = 2.0 * (1.0 + 0.5 * final_sensitivity)
 
         return {
             "raw_sensitivity_score": float(_clip(0.1 + 9.9 * final_sensitivity, 0.1, 10.0)),
+            #raw_sensitivity_score在0.1-10.0之间，是后续DP高斯机制用的统一敏感分
             "privacy_epsilon": float(final_eps),
             "dynamic_delta": float(dynamic_delta),
         }
@@ -94,8 +96,12 @@ class PrivacyScorer:
         return profile["privacy_epsilon"], profile["dynamic_delta"]
 
     def _estimate_sensitivity(self, text_chunk: str) -> float:
+        '''真正判断文本敏感程度：对一个语块进行隐私敏感度评估，返回评估结果。'''
+        # 先按正则表达式扫描，判断是否有直接的隐私标识符
         regex_score = self._quick_regex_scan(text_chunk)
+        # 再按关键词扫描，判断是否有直接的隐私标识符
         keyword_score = self._keyword_scan(text_chunk)
+        # 最后启发式语义规则识别上下文敏感性
         heuristic_score = self._heuristic_semantic_scan(text_chunk)
 
         rule_score = _clip(regex_score + keyword_score + heuristic_score, 0.0, 1.0)
@@ -113,6 +119,7 @@ class PrivacyScorer:
         return float(final_sensitivity)
 
     def _semantic_sensitivity(self, text: str) -> float:
+        # 最后使用零样本分类器识别上下文敏感性
         classifier = self.classifier
         if classifier is None or not text.strip():
             return 0.0
@@ -134,6 +141,7 @@ class PrivacyScorer:
         return _clip(sensitive_score - public_score, 0.0, 1.0)
 
     def _quick_regex_scan(self, text: str) -> float:
+        # 先按正则表达式扫描，判断是否有直接的隐私标识符
         weights = {
             "ID": 0.82,
             "Phone": 0.68,
@@ -149,6 +157,7 @@ class PrivacyScorer:
         return _clip(score, 0.0, 1.0)
 
     def _keyword_scan(self, text: str) -> float:
+        # 再按关键词扫描，判断是否有直接的隐私标识符
         score = 0.0
         if self.keyword_patterns["PersonalStrong"].search(text):
             score += 0.22
@@ -161,6 +170,7 @@ class PrivacyScorer:
         return _clip(score, 0.0, 1.0)
 
     def _heuristic_semantic_scan(self, text: str) -> float:
+        # 最后启发式语义规则识别上下文敏感性
         score = 0.0
         has_person_name = re.search(r"[\u4e00-\u9fff]{2,3}", text) is not None
         has_private_context = re.search(r"(会议|参会|名单|联系人|客户|员工|候选人)", text) is not None

@@ -8,13 +8,14 @@ from privacy_judge import PrivacyScorer
 
 DocumentSource = Union[str, Path, Iterable[Dict[str, str]]]
 
+#先按段落切分，再按句子切分，最后按软分隔符切分
 PARAGRAPH_RE = re.compile(r"\n\s*\n+")
 SENTENCE_RE = re.compile(r"(?<=[。！？；!?;])\s*|(?<=[A-Za-z0-9][.])\s+")
 SOFT_SEPARATOR_RE = re.compile(r"(?<=[，,、：:])\s*|\s+")
 
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
-    """Split text into complete semantic chunks without duplicating sentences."""
+    """文本切分函数，将输入文本切分成多个片段，每个片段的长度不超过 chunk_size，并且相邻片段之间有 overlap 的重叠部分。"""
     _validate_chunk_args(chunk_size, overlap)
     if not text or not text.strip():
         return []
@@ -52,8 +53,9 @@ def iter_chunk_documents(
     overlap: int = 200,
     scorer: Optional[PrivacyScorer] = None,
 ) -> Iterator[Dict[str, object]]:
-    """Yield privacy-scored chunks from loaded docs or a knowledge-base folder."""
+    """从已加载的文档或知识库文件夹中提取经过隐私评分处理的片段，负责把文档流变成带隐私评分的chunk流。"""
     _validate_chunk_args(chunk_size, overlap)
+    # 初始化隐私评分器，如果外部已经传入PrivacyScorer就复用外部的，如果没有传就创建一个默认评分器
     scorer = scorer or PrivacyScorer()
 
     for doc in _iter_documents(source):
@@ -84,6 +86,8 @@ def chunk_documents(
 
 
 def _iter_documents(source: DocumentSource) -> Iterator[Dict[str, str]]:
+    """递归遍历文档源，返回所有文档。如果 source 是路径，就调用 loader.py 读取文件
+        如果 source 已经是文档列表/生成器，就直接遍历"""
     if isinstance(source, (str, Path)):
         from loader import load_documents
 
@@ -137,6 +141,7 @@ def _split_oversized_unit(text: str, chunk_size: int) -> List[str]:
             packed.extend(_split_oversized_unit(current, chunk_size))
         return packed
 
+    # 如果软分隔符切分失败，就按硬换行切分
     return textwrap.wrap(
         text,
         width=chunk_size,

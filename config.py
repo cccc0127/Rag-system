@@ -21,6 +21,7 @@ class Config:
     DP_DELTA = 1e-5
     DP_RANDOM_SEED = 42
     DP_UTILITY_SCALE = 0.01
+    #DP_UTILITY_SCALE = 0.1
 
     # FAISS 索引缓存目录
     FAISS_CACHE = BASE_DIR / "cache" / "faiss_index"

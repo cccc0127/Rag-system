@@ -13,22 +13,31 @@ logger = logging.getLogger(__name__)
 # 定义一个数据类NoiseCalibration，用于存储隐私噪声参数
 @dataclass(frozen=True)
 class NoiseCalibration:
-    """Resolved DP noise parameters for one embedding vector."""
+    #来自privacy_judge.py的raw_sensitivity_score，经过clip和线性映射后的敏感分数，范围在0.1-10.0之间
     raw_score: float
+    # 对raw_score进行归一化，范围在0-1之间，方便后续函数映射
     normalized_score: float
+    #当前chunk的隐私预算，范围在0.5-10.0之间，敏感度越高，epsilon越小
     epsilon: float
+    #当前chunk的局部敏感度Delta_i，范围在0.25-0.5之间，敏感度越高，Delta_i越大
     local_sensitivity: float
+    #解析高斯机制计算出来的基础噪声标准差
     sigma: float
+    #是否成功通过brentq求解器找到满足条件的噪声乘子，如果为False，则使用了经典高斯机制的计算方式
     solved_by_brentq: bool
 
-
+#记录一次真实加噪的过程，主要是为了呈现诊断信息，方便后续分析和调试
 @dataclass(frozen=True)
 class NoiseApplication:
-    """Diagnostic details for one clipped-and-noised embedding vector."""
+    #clipped_vector+noise_vector，最终加噪后的向量
     noised_vector: np.ndarray
+    #加噪前，经过L2 clipping的信号向量
     clipped_vector: np.ndarray
+    #实际采样出来的高斯噪声向量
     noise_vector: np.ndarray
+    #隐私噪声参数
     calibration: NoiseCalibration
+    #真正传给模型的噪声标准差，每个维度的噪声标准差不同
     sigma_per_dim: float
 
 
@@ -39,16 +48,19 @@ class AnalyticGaussianCalibrator:
     engineering level: more sensitive text receives a smaller privacy budget
     and a larger local neighbourhood radius before Gaussian perturbation.
     """
-
+    #和privacy_judge.py中的raw_sensitivity_score范围一致，异常值截断
     SCORE_MIN = 0.1
     SCORE_MAX = 10.0
 
     def __init__(
         self,
         delta: float = 1e-5,
+        # brentq求解器的根搜索区间，单位是高斯机制的噪声乘子u，默认是(0.0001, 100.0)，如果这个区间内没有满足条件的根，就会退化到经典高斯机制的计算方式
         root_interval: tuple[float, float] = (0.0001, 100.0),
         l2_clip_norm: float = 1.0,
+        # 用于调整噪声标准差的缩放因子，默认是0.01，高维噪声有能力放大问题，这个缩放因子可以帮助控制噪声的实际影响，保持在一个合理的范围内
         utility_scale: float = 0.01,
+        # 随机种子，用于控制随机数的可重复性，默认是None，表示使用系统时间作为种子
         random_state: int | None = None,
     ):
         if not 0.0 < delta < 1.0:
@@ -67,22 +79,23 @@ class AnalyticGaussianCalibrator:
         self.rng = np.random.default_rng(random_state)
 
     def normalize_score(self, raw_score: float) -> float:
-        """Map raw sensitivity score [0.1, 10.0] linearly to S_norm in [0, 1]."""
+        """将raw sensitivity score [0.1, 10.0]映射到[0, 1]区间"""
         clipped_score = np.clip(float(raw_score), self.SCORE_MIN, self.SCORE_MAX)
         return float((clipped_score - self.SCORE_MIN) / 9.9)
 
     def compute_epsilon(self, normalized_score: float) -> float:
-        """Dynamic privacy budget: higher sensitivity means smaller epsilon.
+        """根据归一化后的敏感分数计算隐私预算epsilon
 
         The curve is intentionally smoother than a steep exponential decay so
         that high-sensitivity chunks remain in a retrieval-usable epsilon band.
         """
         s_norm = np.clip(float(normalized_score), 0.0, 1.0)
+        # 最高敏感时 epsilon 没有降到极低，比如 0.1 或 0.28，而是保持在 1.25附近，这样可以保证高敏感度的文本仍然具有一定的实用性，而不是被过度保护到无法使用的程度
         epsilon = 1.25 + 8.75 * ((1.0 - s_norm) ** 1.5)
         return float(np.clip(epsilon, 0.5, 10.0))
 
     def compute_local_sensitivity(self, normalized_score: float) -> float:
-        """Dynamic local sensitivity Delta_i as a retrieval-scale radius proxy."""
+        """根据归一化后的敏感分数计算动态局部敏感度Delta_i"""
         s_norm = np.clip(float(normalized_score), 0.0, 1.0)
         return float(0.25 + 0.25 * s_norm)
 
@@ -142,6 +155,7 @@ class AnalyticGaussianCalibrator:
 
     def apply_noise(self, vector: np.ndarray, raw_score: float) -> np.ndarray:
         """Clip an embedding and add calibrated isotropic Gaussian noise."""
+        print(f"DEBUG >>> Current running utility_scale is: {self.utility_scale}")
         return self.apply_noise_with_diagnostics(vector, raw_score).noised_vector
 
     def apply_noise_with_diagnostics(
@@ -178,6 +192,7 @@ class AnalyticGaussianCalibrator:
         )
 
     def compute_sigma_per_dim(self, sigma: float, dim: int) -> float:
+        # 防止高维噪声能量爆炸
         if dim <= 0:
             raise ValueError("dim must be greater than 0")
         return float((float(sigma) * self.utility_scale) / np.sqrt(dim))
