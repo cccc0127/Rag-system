@@ -10,6 +10,7 @@ import argparse
 import os
 import re
 import textwrap
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
@@ -37,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--knowledge-base", type=Path, default=config.REFERENCE_FOLDER)
     parser.add_argument("--embedding-model", default=config.EMBEDDING_MODEL)
-    parser.add_argument("--sample-chunks", type=int, default=1000)
+    parser.add_argument("--sample-chunks", type=int, default=100)
     parser.add_argument("--num-queries", type=int, default=5)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--chunk-size", type=int, default=getattr(config, "CHUNK_SIZE", 1000))
@@ -188,7 +189,7 @@ def apply_dp_noise(
     reduced_embeddings: np.ndarray,
     chunk_records: Sequence[Dict[str, object]],
     calibrator: AnalyticGaussianCalibrator,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     applications: List[NoiseApplication] = [
         calibrator.apply_noise_with_diagnostics(
             vector,
@@ -200,7 +201,10 @@ def apply_dp_noise(
     noise = np.vstack([item.noise_vector for item in applications]).astype(np.float32)
     noised = np.vstack([item.noised_vector for item in applications]).astype(np.float32)
     final_noised = l2_normalize(noised)
-    return final_noised, clipped, noise
+    sigmas = np.array([item.calibration.sigma for item in applications], dtype=np.float32)
+    sigma_per_dim = np.array([item.sigma_per_dim for item in applications], dtype=np.float32)
+    epsilons = np.array([item.calibration.epsilon for item in applications], dtype=np.float32)
+    return final_noised, clipped, noise, sigmas, sigma_per_dim, epsilons
 
 
 def generate_random_queries(
@@ -237,9 +241,28 @@ def cosine_scores(query_vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     return docs @ query
 
 
+def paired_cosine(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    left_norm = l2_normalize(left)
+    right_norm = l2_normalize(right)
+    return np.sum(left_norm * right_norm, axis=1)
+
+
 def top_k_indices(scores: np.ndarray, top_k: int) -> np.ndarray:
     top_k = min(top_k, scores.size)
     return np.argsort(scores)[::-1][:top_k]
+
+
+def overlap_at_k(raw_top: np.ndarray, noised_top: np.ndarray, k: int) -> float:
+    raw_set = set(int(idx) for idx in raw_top[:k])
+    noised_set = set(int(idx) for idx in noised_top[:k])
+    return len(raw_set & noised_set) / max(1, min(k, len(raw_set)))
+
+
+def reciprocal_rank_at_k(target_id: int, ranked_ids: np.ndarray, k: int) -> float:
+    for rank, idx in enumerate(ranked_ids[:k], start=1):
+        if int(idx) == int(target_id):
+            return 1.0 / rank
+    return 0.0
 
 
 def safe_pearson(left: np.ndarray, right: np.ndarray) -> float:
@@ -405,29 +428,51 @@ def evaluate_utility_scale(
         utility_scale=float(config.DP_UTILITY_SCALE),
         random_state=args.noise_seed,
     )
-    final_noised_embeddings, clipped_embeddings, noise_vectors = apply_dp_noise(
+    noise_start = time.perf_counter()
+    (
+        final_noised_embeddings,
+        clipped_embeddings,
+        noise_vectors,
+        sigmas,
+        sigma_per_dim,
+        epsilons,
+    ) = apply_dp_noise(
         reduced_raw_embeddings,
         chunk_records,
         calibrator,
     )
+    dp_noise_time = time.perf_counter() - noise_start
 
     signal_norms = l2_norms(clipped_embeddings)
     noise_norms = l2_norms(noise_vectors)
     noise_signal_ratios = noise_norms / np.maximum(signal_norms, 1e-12)
     mean_noise_signal_ratio = float(np.mean(noise_signal_ratios))
+    direction_cosines = paired_cosine(reduced_raw_embeddings, final_noised_embeddings)
 
     rows = []
-    overlap_values: List[float] = []
+    overlap_values: Dict[int, List[float]] = {1: [], 3: [], 5: [], 10: []}
     pearson_values: List[float] = []
     drift_values: List[float] = []
+    max_drift_values: List[float] = []
+    mrr5_values: List[float] = []
+    raw_retrieval_times: List[float] = []
+    noised_retrieval_times: List[float] = []
     visual_samples: List[Dict[str, object]] = []
+    retrieval_depth = max(args.top_k, 10, 5)
 
     for query_id, (query, query_vec) in enumerate(zip(queries, query_reduced), start=1):
+        raw_start = time.perf_counter()
         raw_scores = cosine_scores(query_vec, reduced_raw_embeddings)
-        noised_scores = cosine_scores(query_vec, final_noised_embeddings)
+        raw_top_full = top_k_indices(raw_scores, retrieval_depth)
+        raw_retrieval_times.append(time.perf_counter() - raw_start)
 
-        raw_top = top_k_indices(raw_scores, args.top_k)
-        noised_top = top_k_indices(noised_scores, args.top_k)
+        noised_start = time.perf_counter()
+        noised_scores = cosine_scores(query_vec, final_noised_embeddings)
+        noised_top_full = top_k_indices(noised_scores, retrieval_depth)
+        noised_retrieval_times.append(time.perf_counter() - noised_start)
+
+        raw_top = raw_top_full[: min(args.top_k, raw_top_full.size)]
+        noised_top = noised_top_full[: min(args.top_k, noised_top_full.size)]
         if raw_top.size > 0 and query_id <= args.visual_queries:
             top1_id = int(raw_top[0])
             visual_samples.append(
@@ -438,15 +483,18 @@ def evaluate_utility_scale(
                     "raw_text": str(chunk_records[top1_id]["content"]),
                 }
             )
-        raw_set = set(int(idx) for idx in raw_top)
-        noised_set = set(int(idx) for idx in noised_top)
-        overlap = len(raw_set & noised_set) / max(1, min(args.top_k, len(raw_set)))
+        for k in overlap_values:
+            overlap_values[k].append(overlap_at_k(raw_top_full, noised_top_full, k))
+        overlap = overlap_at_k(raw_top_full, noised_top_full, args.top_k)
+        mrr5_values.append(reciprocal_rank_at_k(int(raw_top_full[0]), noised_top_full, 5))
         pearson = safe_pearson(raw_scores, noised_scores)
-        drift = float(np.mean(np.abs(noised_scores - raw_scores)))
+        abs_drift = np.abs(noised_scores - raw_scores)
+        drift = float(np.mean(abs_drift))
+        max_drift = float(np.max(abs_drift))
 
-        overlap_values.append(float(overlap))
         pearson_values.append(float(pearson))
         drift_values.append(drift)
+        max_drift_values.append(max_drift)
         rows.append(
             [
                 query_id,
@@ -454,6 +502,7 @@ def evaluate_utility_scale(
                 f"{overlap:.3f}",
                 f"{pearson:.6f}",
                 f"{drift:.6f}",
+                f"{reciprocal_rank_at_k(int(raw_top_full[0]), noised_top_full, 5):.3f}",
                 ",".join(str(idx) for idx in raw_top.tolist()),
                 ",".join(str(idx) for idx in noised_top.tolist()),
             ]
@@ -473,22 +522,47 @@ def evaluate_utility_scale(
 
     print("\nPer-query Summary Report")
     print_table(
-        ["Q", "Query", f"Overlap@{args.top_k}", "Pearson", "MeanAbsDrift", "R_raw", "R_noised"],
+        ["Q", "Query", f"Overlap@{args.top_k}", "Pearson", "MeanAbsDrift", "MRR@5", "R_raw", "R_noised"],
         rows,
     )
 
-    mean_overlap = float(np.mean(overlap_values))
+    mean_overlap1 = float(np.mean(overlap_values[1]))
+    mean_overlap3 = float(np.mean(overlap_values[3]))
+    mean_overlap5 = float(np.mean(overlap_values[5]))
+    mean_overlap10 = float(np.mean(overlap_values[10]))
+    mean_overlap = mean_overlap5
     mean_pearson = float(np.nanmean(pearson_values))
     mean_drift = float(np.mean(drift_values))
+    max_abs_drift = float(np.max(max_drift_values))
+    mean_mrr5 = float(np.mean(mrr5_values))
+    mean_direction_cosine = float(np.mean(direction_cosines))
+    min_direction_cosine = float(np.min(direction_cosines))
+    max_direction_cosine = float(np.max(direction_cosines))
+    mean_raw_retrieval_time = float(np.mean(raw_retrieval_times))
+    mean_noised_retrieval_time = float(np.mean(noised_retrieval_times))
 
     print("\nAggregate Metrics")
     print_table(
         ["Metric", "Value"],
         [
             ["Mean Noise/Signal Ratio", f"{mean_noise_signal_ratio:.6f}"],
-            [f"Mean Overlap@{args.top_k}", f"{mean_overlap:.6f}"],
+            ["Mean Overlap@1", f"{mean_overlap1:.6f}"],
+            ["Mean Overlap@3", f"{mean_overlap3:.6f}"],
+            ["Mean Overlap@5", f"{mean_overlap5:.6f}"],
+            ["Mean Overlap@10", f"{mean_overlap10:.6f}"],
+            ["Mean MRR@5", f"{mean_mrr5:.6f}"],
             ["Mean Pearson Correlation", f"{mean_pearson:.6f}"],
             ["Mean Absolute Drift", f"{mean_drift:.6f}"],
+            ["Max Absolute Drift", f"{max_abs_drift:.6f}"],
+            ["Direction Cosine Min/Mean/Max", f"{min_direction_cosine:.6f} / {mean_direction_cosine:.6f} / {max_direction_cosine:.6f}"],
+            ["Mean Sigma", f"{float(np.mean(sigmas)):.6f}"],
+            ["Max Sigma", f"{float(np.max(sigmas)):.6f}"],
+            ["Mean Sigma_per_dim", f"{float(np.mean(sigma_per_dim)):.8f}"],
+            ["Mean Epsilon", f"{float(np.mean(epsilons)):.6f}"],
+            ["Min Epsilon", f"{float(np.min(epsilons)):.6f}"],
+            ["DP Noise Injection Time", f"{dp_noise_time:.6f}s"],
+            ["Mean Raw Retrieval Time / Query", f"{mean_raw_retrieval_time:.6f}s"],
+            ["Mean Noised Retrieval Time / Query", f"{mean_noised_retrieval_time:.6f}s"],
             ["Noise L2 Min/Mean/Max", f"{noise_norms.min():.6f} / {noise_norms.mean():.6f} / {noise_norms.max():.6f}"],
             ["Signal L2 Min/Mean/Max", f"{signal_norms.min():.6f} / {signal_norms.mean():.6f} / {signal_norms.max():.6f}"],
         ],
@@ -509,8 +583,18 @@ def evaluate_utility_scale(
         "utility_scale": float(utility_scale),
         "mean_nsr": mean_noise_signal_ratio,
         "mean_overlap": mean_overlap,
+        "mean_overlap1": mean_overlap1,
+        "mean_overlap3": mean_overlap3,
+        "mean_overlap5": mean_overlap5,
+        "mean_overlap10": mean_overlap10,
         "mean_pearson": mean_pearson,
         "mean_drift": mean_drift,
+        "max_drift": max_abs_drift,
+        "mean_mrr5": mean_mrr5,
+        "mean_direction_cosine": mean_direction_cosine,
+        "dp_noise_time": dp_noise_time,
+        "mean_raw_retrieval_time": mean_raw_retrieval_time,
+        "mean_noised_retrieval_time": mean_noised_retrieval_time,
     }
 
 
@@ -572,8 +656,30 @@ def plot_privacy_utility_tradeoff(results: Sequence[Dict[str, float]], output_pa
     plt.close(fig)
 
 
+def cleanup_old_evaluator_figures(result_dir: Path) -> None:
+    old_filenames = [
+        "noise_signal_ratio_curve.png",
+        "overlap_at_1_curve.png",
+        "overlap_at_3_curve.png",
+        "overlap_at_5_curve.png",
+        "overlap_at_10_curve.png",
+        "pearson_correlation_curve.png",
+        "mean_absolute_drift_curve.png",
+        "max_absolute_drift_curve.png",
+        "mrr_at_5_curve.png",
+        "direction_cosine_curve.png",
+        "retrieval_time_curve.png",
+        "dp_noise_time_curve.png",
+    ]
+    for filename in old_filenames:
+        path = result_dir / filename
+        if path.is_file():
+            path.unlink()
+
+
 def evaluate(args: argparse.Namespace) -> None:
     os.makedirs(RESULT_DIR, exist_ok=True)
+    cleanup_old_evaluator_figures(RESULT_DIR)
     context = prepare_evaluation_context(args)
     results = [
         evaluate_utility_scale(args, context, utility_scale)
@@ -581,7 +687,8 @@ def evaluate(args: argparse.Namespace) -> None:
     ]
     output_path = RESULT_DIR / "privacy_utility_tradeoff.png"
     plot_privacy_utility_tradeoff(results, output_path)
-    print(f"\nSaved privacy-utility tradeoff figure: {output_path}")
+    print("\nSaved evaluation figures:")
+    print(f"  {output_path}")
 
 
 def main() -> None:
