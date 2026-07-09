@@ -7,7 +7,7 @@ from typing import Dict
 import numpy as np
 
 from comparison_experiments.shared.retrievers import RetrievalResult, exact_topk
-from comparison_experiments.schemes.our_dp_rag import SchemeOutput
+from comparison_experiments.shared.types import SchemeOutput
 
 
 def compute_scheme_metrics(
@@ -17,9 +17,19 @@ def compute_scheme_metrics(
     ef_search: int | None = None,
 ) -> Dict[str, float | int | str]:
     reference_depth = max(10, top_k, 5)
+    reference_document_vectors = (
+        scheme_output.reference_document_vectors
+        if scheme_output.reference_document_vectors is not None
+        else scheme_output.document_vectors
+    )
+    reference_query_vectors = (
+        scheme_output.reference_query_vectors
+        if scheme_output.reference_query_vectors is not None
+        else scheme_output.query_vectors
+    )
     reference_topk = exact_topk(
-        scheme_output.document_vectors,
-        scheme_output.query_vectors,
+        reference_document_vectors,
+        reference_query_vectors,
         reference_depth,
     )
     hnsw_topk = retrieval.topk_indices
@@ -34,11 +44,11 @@ def compute_scheme_metrics(
         "mean_noise_signal_ratio": _metadata_float(scheme_output, "mean_noise_signal_ratio"),
         "mean_sigma": _metadata_float(scheme_output, "mean_sigma"),
         "mean_epsilon": _metadata_float(scheme_output, "mean_epsilon"),
-        "hnsw_recall_at_1": _mean_overlap(reference_topk, hnsw_topk, 1),
-        "hnsw_recall_at_3": _mean_overlap(reference_topk, hnsw_topk, 3),
         "hnsw_recall_at_5": _mean_overlap(reference_topk, hnsw_topk, 5),
-        "hnsw_recall_at_10": _mean_overlap(reference_topk, hnsw_topk, 10),
         "hnsw_mrr_at_5": _mean_mrr_at_5(reference_topk, hnsw_topk),
+        "sap_noise_signal_ratio": _metadata_float(scheme_output, "sap_noise_signal_ratio"),
+        "beta": _metadata_float(scheme_output, "beta"),
+        "ratio_k": _metadata_float(scheme_output, "ratio_k"),
     }
     metrics.update(
         {

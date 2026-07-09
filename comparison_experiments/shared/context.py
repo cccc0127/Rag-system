@@ -10,6 +10,11 @@ from typing import Dict, List
 
 import numpy as np
 
+from comparison_experiments.comparison_config import (
+    DEFAULT_SAMPLE_CHUNKS,
+    DEFAULT_TEST_QUERIES,
+    TEST_QUERY_SEED,
+)
 from config import config
 from evaluator import (
     count_iterated_documents,
@@ -32,11 +37,11 @@ class ComparisonContext:
 def add_context_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--knowledge-base", type=Path, default=config.REFERENCE_FOLDER)
     parser.add_argument("--embedding-model", default=config.EMBEDDING_MODEL)
-    parser.add_argument("--sample-chunks", type=int, default=100)
-    parser.add_argument("--num-queries", type=int, default=5)
+    parser.add_argument("--sample-chunks", type=int, default=DEFAULT_SAMPLE_CHUNKS)
+    parser.add_argument("--num-queries", type=int, default=DEFAULT_TEST_QUERIES)
     parser.add_argument("--chunk-size", type=int, default=getattr(config, "CHUNK_SIZE", 1000))
     parser.add_argument("--overlap", type=int, default=getattr(config, "OVERLAP", 200))
-    parser.add_argument("--query-seed", type=int, default=2026)
+    parser.add_argument("--query-seed", type=int, default=TEST_QUERY_SEED)
     parser.add_argument(
         "--enable-nlp-privacy",
         action="store_true",

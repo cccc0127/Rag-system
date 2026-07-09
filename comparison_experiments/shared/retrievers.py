@@ -15,6 +15,7 @@ class RetrievalResult:
     topk_indices: np.ndarray
     query_times: np.ndarray
     index_build_time: float
+    filter_topk_indices: np.ndarray | None = None
 
 
 def run_hnsw_retrieval(
@@ -60,6 +61,51 @@ def run_hnsw_retrieval(
         topk_indices=np.vstack(topk_rows).astype(np.int64),
         query_times=np.array(query_times, dtype=np.float64),
         index_build_time=float(index_build_time),
+    )
+
+# 过滤-精简两阶段检索
+def run_hnsw_filter_refine_retrieval(
+    document_vectors: np.ndarray,
+    query_vectors: np.ndarray,
+    reference_document_vectors: np.ndarray,
+    reference_query_vectors: np.ndarray,
+    top_k: int,
+    k_prime: int,
+    ef_search: int,
+    M: int,
+    ef_construction: int,
+    space: str = "l2",
+    random_seed: int = 42,
+) -> RetrievalResult:
+    filter_result = run_hnsw_retrieval(
+        document_vectors=document_vectors,
+        query_vectors=query_vectors,
+        top_k=max(top_k, k_prime),
+        ef_search=ef_search,
+        M=M,
+        ef_construction=ef_construction,
+        space=space,
+        random_seed=random_seed,
+    )
+
+    reference_document_vectors = np.asarray(reference_document_vectors, dtype=np.float32)
+    reference_query_vectors = np.asarray(reference_query_vectors, dtype=np.float32)
+    refined_rows: list[np.ndarray] = []
+    refine_times: list[float] = []
+    for query_id, candidates in enumerate(filter_result.topk_indices):
+        refine_start = time.perf_counter()
+        query = reference_query_vectors[query_id]
+        candidate_vectors = reference_document_vectors[candidates]
+        distances = np.sum((candidate_vectors - query) ** 2, axis=1)
+        order = np.argsort(distances)[:top_k]
+        refined_rows.append(candidates[order])
+        refine_times.append(time.perf_counter() - refine_start)
+
+    return RetrievalResult(
+        topk_indices=np.vstack(refined_rows).astype(np.int64),
+        query_times=filter_result.query_times + np.array(refine_times, dtype=np.float64),
+        index_build_time=filter_result.index_build_time,
+        filter_topk_indices=filter_result.topk_indices,
     )
 
 

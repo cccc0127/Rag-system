@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Dict, Sequence
 
 import numpy as np
 
 from dimension_reduction import JLProjector, l2_normalize
 from gaussian_noise import AnalyticGaussianCalibrator, NoiseApplication
-
-
-@dataclass
-class SchemeOutput:
-    name: str
-    backend_type: str
-    document_vectors: np.ndarray
-    query_vectors: np.ndarray
-    vector_dim: int
-    metadata: Dict[str, float | int | str]
+from comparison_experiments.shared.types import SchemeOutput
 
 
 class OurDPRAGScheme:
@@ -90,6 +80,11 @@ class OurDPRAGScheme:
             "mean_epsilon": float(np.mean(epsilons)),
             "mean_noise_signal_ratio": float(np.mean(nsr)),
             "vector_dim": int(document_vectors.shape[1]),
+            "uses_dp": True,
+            "uses_jl": True,
+            "uses_encryption": False,
+            "distance_metric": "cosine",
+            "hnsw_space": "cosine",
         }
 
         return SchemeOutput(
@@ -99,4 +94,6 @@ class OurDPRAGScheme:
             query_vectors=query_vectors.astype(np.float32),
             vector_dim=int(document_vectors.shape[1]),
             metadata=metadata,
+            reference_document_vectors=l2_normalize(raw_embeddings),
+            reference_query_vectors=l2_normalize(query_embeddings),
         )

@@ -1,0 +1,23 @@
+{
+  "DCPE+DCE": {
+    "beta": 0.1,
+    "ratio_k": 4,
+    "sap_nsr_min_threshold": 0.003,
+    "selected_metrics": {
+      "hnsw_mrr_at_5": 0.8666666666666667,
+      "hnsw_recall_at_5": 0.9466666666666667,
+      "sap_noise_signal_ratio": 0.024978388100862503
+    },
+    "selection_rule": "max Recall@5 subject to sap_noise_signal_ratio >= threshold"
+  },
+  "Our DP-RAG": {
+    "nsr_min_threshold": 0.003,
+    "selected_metrics": {
+      "hnsw_mrr_at_5": 1.0,
+      "hnsw_recall_at_5": 1.0,
+      "mean_noise_signal_ratio": 0.0035167059395462275
+    },
+    "selection_rule": "max Recall@5 subject to mean_noise_signal_ratio >= threshold",
+    "utility_scale": 0.01
+  }
+}

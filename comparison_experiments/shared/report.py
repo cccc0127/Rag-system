@@ -9,7 +9,7 @@ import numpy as np
 
 from comparison_experiments.shared.context import ComparisonContext
 from comparison_experiments.shared.retrievers import RetrievalResult
-from comparison_experiments.schemes.our_dp_rag import SchemeOutput
+from comparison_experiments.shared.types import SchemeOutput
 
 
 def print_table(headers: Sequence[str], rows: Sequence[Sequence[object]]) -> None:
@@ -69,10 +69,8 @@ def print_scheme_report(
         [
             ["Mean Query Time", f"{float(metrics['mean_query_time']):.8f}s"],
             ["Index Build Time", f"{float(metrics['index_build_time']):.6f}s"],
-            ["HNSW Recall@1 vs Exact", f"{float(metrics['hnsw_recall_at_1']):.6f}"],
-            ["HNSW Recall@3 vs Exact", f"{float(metrics['hnsw_recall_at_3']):.6f}"],
             ["HNSW Recall@5 vs Exact", f"{float(metrics['hnsw_recall_at_5']):.6f}"],
-            ["HNSW Recall@10 vs Exact", f"{float(metrics['hnsw_recall_at_10']):.6f}"],
+            ["HNSW MRR@5 vs Exact", f"{float(metrics['hnsw_mrr_at_5']):.6f}"],
         ],
     )
 
@@ -86,6 +84,10 @@ def print_scheme_report(
             ["Utility Scale", scheme_output.metadata.get("utility_scale", "")],
             ["DP Delta", scheme_output.metadata.get("dp_delta", "")],
             ["JL Target Dim", scheme_output.metadata.get("jl_target_dim", "")],
+            ["SAP Noise/Signal Ratio", _format_optional_float(metrics.get("sap_noise_signal_ratio"))],
+            ["DCPE Beta", _format_optional_float(metrics.get("beta"))],
+            ["DCPE ratio_k", _format_optional_float(metrics.get("ratio_k"))],
+            ["Refine", scheme_output.metadata.get("refine", "")],
         ],
     )
 
@@ -173,3 +175,13 @@ def _wrap_field(label: str, value: str, width: int) -> list[str]:
             else:
                 lines.append(line)
     return lines
+
+
+def _format_optional_float(value: object) -> str:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return ""
+    if np.isnan(number):
+        return ""
+    return f"{number:.6f}"
