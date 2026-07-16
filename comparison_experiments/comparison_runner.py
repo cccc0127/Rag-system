@@ -46,6 +46,8 @@ from comparison_experiments.schemes.our_dp_rag import OurDPRAGScheme
 
 RESULTS_DIR = ROOT_DIR / "comparison_experiments" / "results"
 PICTURE_DIR = ROOT_DIR / "Result_picture" / "comparison"
+DEFAULT_OUR_VARIANTS = "no_jl,jl768,jl256"
+DEFAULT_RECOMMENDED_PARAMS = RESULTS_DIR / "recommended_params.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,7 +76,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dcpe-beta", type=float, default=0.5)
     parser.add_argument("--dcpe-ratio-k", type=int, default=4)
     parser.add_argument("--dcpe-seed", type=int, default=42)
-    parser.add_argument("--recommended-params", type=Path, default=None)
+    parser.add_argument("--recommended-params", type=Path, default=DEFAULT_RECOMMENDED_PARAMS)
+    parser.add_argument("--no-recommended-params", action="store_true")
+    parser.add_argument("--our-variants", default=DEFAULT_OUR_VARIANTS)
+    parser.add_argument("--disable-dcpe-dce", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--visual-text-chars", type=int, default=400)
     return parser.parse_args()
@@ -84,27 +89,13 @@ def run(args: argparse.Namespace) -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     PICTURE_DIR.mkdir(parents=True, exist_ok=True)
     cleanup_old_ef_search_figures(PICTURE_DIR)
-    apply_recommended_params(args)
+    recommended_params = apply_recommended_params(args)
 
     context = prepare_comparison_context(args)
     if args.verbose:
         print_context_summary(context)
 
-    schemes = [
-        OurDPRAGScheme(
-            jl_target_dim=args.jl_target_dim,
-            jl_epsilon=args.jl_epsilon,
-            jl_seed=args.jl_seed,
-            dp_delta=args.dp_delta,
-            utility_scale=args.utility_scale,
-            noise_seed=args.noise_seed,
-        ),
-        DCPEDCEScheme(
-            beta=args.dcpe_beta,
-            ratio_k=args.dcpe_ratio_k,
-            random_seed=args.dcpe_seed,
-        ),
-    ]
+    schemes = build_schemes(args, recommended_params)
 
     all_metrics: list[Dict[str, float | int | str]] = []
     ef_search_list = parse_int_list(args.ef_search_list)
@@ -269,10 +260,117 @@ def parse_int_list(raw_value: str) -> list[int]:
     return sorted(set(values))
 
 
-def apply_recommended_params(args: argparse.Namespace) -> None:
+def parse_our_variants(raw_value: str, default_jl_target_dim: int) -> list[dict[str, int | str]]:
+    variants: list[dict[str, int | str]] = []
+    for raw_part in str(raw_value).split(","):
+        token = raw_part.strip().lower().replace("-", "_")
+        if not token:
+            continue
+        if token in {"no_jl", "nojl"}:
+            variants.append(
+                {
+                    "name": "Our DP-RAG-NoJL",
+                    "representation_mode": "no_jl",
+                    "jl_target_dim": int(default_jl_target_dim),
+                }
+            )
+        elif token == "jl768":
+            variants.append(
+                {
+                    "name": "Our DP-RAG-JL768",
+                    "representation_mode": "jl",
+                    "jl_target_dim": 768,
+                }
+            )
+        elif token == "jl256":
+            variants.append(
+                {
+                    "name": "Our DP-RAG-JL256",
+                    "representation_mode": "jl",
+                    "jl_target_dim": 256,
+                }
+            )
+        elif token.startswith("jl") and token[2:].isdigit():
+            dim = int(token[2:])
+            variants.append(
+                {
+                    "name": f"Our DP-RAG-JL{dim}",
+                    "representation_mode": "jl",
+                    "jl_target_dim": dim,
+                }
+            )
+        else:
+            raise ValueError(
+                f"Unknown Our DP-RAG variant: {raw_part}. "
+                "Expected values like: no_jl,jl768,jl256"
+            )
+    if not variants:
+        raise ValueError("--our-variants must contain at least one variant")
+    return variants
+
+
+def build_schemes(
+    args: argparse.Namespace,
+    recommended_params: dict[str, object],
+) -> list[object]:
+    schemes: list[object] = []
+    for variant in parse_our_variants(args.our_variants, args.jl_target_dim):
+        variant_name = str(variant["name"])
+        schemes.append(
+            OurDPRAGScheme(
+                name=variant_name,
+                representation_mode=str(variant["representation_mode"]),
+                jl_target_dim=int(variant["jl_target_dim"]),
+                jl_epsilon=args.jl_epsilon,
+                jl_seed=args.jl_seed,
+                dp_delta=args.dp_delta,
+                utility_scale=resolve_our_variant_utility_scale(
+                    recommended_params,
+                    variant_name,
+                    args.utility_scale,
+                ),
+                noise_seed=args.noise_seed,
+            )
+        )
+    if not args.disable_dcpe_dce:
+        schemes.append(
+            DCPEDCEScheme(
+                beta=args.dcpe_beta,
+                ratio_k=args.dcpe_ratio_k,
+                random_seed=args.dcpe_seed,
+            )
+        )
+    return schemes
+
+
+def resolve_our_variant_utility_scale(
+    recommended_params: dict[str, object],
+    variant_name: str,
+    default_utility_scale: float,
+) -> float:
+    variant_params = recommended_params.get(variant_name, {})
+    if isinstance(variant_params, dict) and "utility_scale" in variant_params:
+        return float(variant_params["utility_scale"])
+    base_params = recommended_params.get("Our DP-RAG", {})
+    if isinstance(base_params, dict) and "utility_scale" in base_params:
+        return float(base_params["utility_scale"])
+    return float(default_utility_scale)
+
+
+def apply_recommended_params(args: argparse.Namespace) -> dict[str, object]:
+    if getattr(args, "no_recommended_params", False):
+        if getattr(args, "verbose", False):
+            print("Recommended params disabled by --no-recommended-params")
+        return {}
     if args.recommended_params is None:
-        return
-    with Path(args.recommended_params).open("r", encoding="utf-8") as handle:
+        return {}
+    path = Path(args.recommended_params)
+    if not path.exists():
+        if getattr(args, "verbose", False):
+            print(f"Recommended params not found, using CLI/default params: {path}")
+        return {}
+
+    with path.open("r", encoding="utf-8") as handle:
         params = json.load(handle)
 
     our_params = params.get("Our DP-RAG", {})
@@ -286,7 +384,8 @@ def apply_recommended_params(args: argparse.Namespace) -> None:
         args.dcpe_ratio_k = int(dcpe_params["ratio_k"])
 
     if getattr(args, "verbose", False):
-        print(f"Loaded recommended params from {args.recommended_params}")
+        print(f"Loaded recommended params from {path}")
+    return params
 
 
 def main() -> None:

@@ -7,10 +7,12 @@ It is separate from:
 - `ablation_experiments/`, which studies internal component ablations.
 - `hnsw_experiments/`, which validates HNSW retrieval migration.
 
-The current implementation provides two schemes:
+The current implementation provides several scheme adapters:
 
 ```text
-Our DP-RAG + HNSW
+Our DP-RAG-NoJL + HNSW
+Our DP-RAG-JL768 + HNSW
+Our DP-RAG-JL256 + HNSW
 DCPE+DCE + HNSW filter-refine
 ```
 
@@ -26,9 +28,12 @@ same raw embeddings
 same queries
 same query embeddings
 
-Our DP-RAG:
+Our DP-RAG variants:
 raw 1024d embeddings
--> JL projection 256d
+-> representation layer:
+   - NoJL: raw normalized 1024d, high-fidelity mode
+   - JL768: JL projection 768d, balanced mode
+   - JL256: JL projection 256d, high-efficiency / historical mode
 -> L2 clipping
 -> dynamic analytic Gaussian DP noise
 -> final L2 normalization
@@ -53,18 +58,58 @@ Recommended workflow:
 
 ```bash
 python3 comparison_experiments/validation_tuner.py
-python3 comparison_experiments/comparison_runner.py \
-  --recommended-params comparison_experiments/results/recommended_params.json
+python3 comparison_experiments/comparison_runner.py
 ```
 
 The tuning stage selects medium/default parameters for each scheme on
 validation queries. The formal comparison then fixes those method-internal
 parameters and only varies shared comparison variables such as `ef_search`.
+By default, `comparison_runner.py` automatically reads:
+
+```text
+comparison_experiments/results/recommended_params.json
+```
+
+If the file does not exist, the runner falls back to CLI/default parameters.
+
+Disable recommended parameters:
+
+```bash
+python3 comparison_experiments/comparison_runner.py --no-recommended-params
+```
+
+Use a different recommendation file:
+
+```bash
+python3 comparison_experiments/comparison_runner.py \
+  --recommended-params path/to/recommended_params.json
+```
 
 Run comparison directly:
 
 ```bash
 python3 comparison_experiments/comparison_runner.py
+```
+
+By default, the runner evaluates:
+
+```text
+Our DP-RAG-NoJL
+Our DP-RAG-JL768
+Our DP-RAG-JL256
+DCPE+DCE
+```
+
+Run only Our DP-RAG variants:
+
+```bash
+python3 comparison_experiments/comparison_runner.py --disable-dcpe-dce
+```
+
+Customize Our DP-RAG variants:
+
+```bash
+python3 comparison_experiments/comparison_runner.py --our-variants no_jl,jl768
 ```
 
 Default settings:
@@ -76,6 +121,7 @@ Default settings:
 - `test query_seed=2027`
 - `top_k=5`
 - `utility_scale=0.01`
+- `our_variants=no_jl,jl768,jl256`
 - `ef_search=64`
 - `ef_search_list=16,32,64,128,256`
 - `M=16`
@@ -119,6 +165,12 @@ Result_picture/comparison/
     ├── tuning_our_dprag_nsr_vs_utility_scale.png
     ├── tuning_dcpe_dce_recall_vs_beta.png
     └── tuning_dcpe_dce_sap_nsr_vs_beta.png
+└── database_scale/
+    ├── database_scale_recall_at_5.png
+    ├── database_scale_mrr_at_5.png
+    ├── database_scale_query_time.png
+    ├── database_scale_index_build_time.png
+    └── database_scale_vector_dim.png
 ```
 
 The default-configuration bar charts compare schemes at the default
@@ -130,6 +182,13 @@ raw L2-normalized embeddings. Each scheme is evaluated by how closely its final
 retrieval results preserve the original semantic retrieval result, while HNSW
 remains only the shared retrieval backend.
 
+The three Our DP-RAG variants share the same dynamic analytic Gaussian DP
+mechanism and differ only in the representation layer before clipping/noise:
+
+- `Our DP-RAG-NoJL`: highest semantic fidelity, highest vector dimension.
+- `Our DP-RAG-JL768`: balanced compression mode.
+- `Our DP-RAG-JL256`: historical high-compression mode.
+
 `comparison_runner.py` uses concise output by default and prints only saved
 result paths. Pass `--verbose` to show context summaries, scheme reports,
 ef_search tables, and the Top-1 semantic alignment panel.
@@ -137,6 +196,59 @@ ef_search tables, and the Top-1 semantic alignment panel.
 `validation_tuner.py` also uses concise output by default. It tunes
 `utility_scale` for `Our DP-RAG` and `beta` for `DCPE+DCE`; these are not main
 comparison x-axis variables.
+
+## Database Scale Experiment
+
+The database scale experiment evaluates whether small-scale results remain
+stable as the number of chunks grows. This is useful because at 100 chunks many
+schemes can have similar Recall/MRR, while query time, index build time, and
+filter-refine costs may only separate clearly at larger scales.
+
+Run the default scale sweep:
+
+```bash
+python3 comparison_experiments/database_scale_runner.py
+```
+
+`database_scale_runner.py` uses the same automatic recommended-parameter
+loading behavior. Disable it with:
+
+```bash
+python3 comparison_experiments/database_scale_runner.py --no-recommended-params
+```
+
+Default scale list:
+
+```text
+100,300,500,1000
+```
+
+Run a larger scale sweep:
+
+```bash
+python3 comparison_experiments/database_scale_runner.py \
+  --sample-chunks-list 100,500,1000,2000,5000
+```
+
+Outputs:
+
+```text
+comparison_experiments/results/database_scale_results.csv
+Result_picture/comparison/database_scale/
+```
+
+Interpretation:
+
+- Recall@5 and MRR@5 show whether semantic preservation degrades with more
+  chunks.
+- Mean query time measures online retrieval cost.
+- Index build time measures offline indexing cost.
+- If `Our DP-RAG-NoJL` keeps high recall but query/build time grows faster, it
+  is a high-fidelity high-cost mode.
+- If `Our DP-RAG-JL768` approaches NoJL recall at lower cost, it is the better
+  deployment balance.
+- If `DCPE+DCE` query time grows faster, the HNSW filter-refine cost is becoming
+  visible at scale.
 
 ## Extension Rule
 

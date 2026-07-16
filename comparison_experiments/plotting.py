@@ -81,6 +81,52 @@ def plot_comparison_figures(
     return saved_paths
 
 
+def plot_database_scale_figures(
+    metrics: Sequence[Dict[str, float | int | str]],
+    output_dir: Path,
+) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths = [
+        _plot_database_scale_curve(
+            metrics,
+            value_key="hnsw_recall_at_5",
+            title="Database Scale: Recall@5",
+            ylabel="Recall@5",
+            output_path=output_dir / "database_scale_recall_at_5.png",
+            y_limit=(0.0, 1.1),
+        ),
+        _plot_database_scale_curve(
+            metrics,
+            value_key="hnsw_mrr_at_5",
+            title="Database Scale: MRR@5",
+            ylabel="MRR@5",
+            output_path=output_dir / "database_scale_mrr_at_5.png",
+            y_limit=(0.0, 1.1),
+        ),
+        _plot_database_scale_curve(
+            metrics,
+            value_key="mean_query_time",
+            title="Database Scale: Mean Query Time",
+            ylabel="Mean query time (seconds)",
+            output_path=output_dir / "database_scale_query_time.png",
+            log_y=True,
+        ),
+        _plot_database_scale_curve(
+            metrics,
+            value_key="index_build_time",
+            title="Database Scale: Index Build Time",
+            ylabel="Index build time (seconds)",
+            output_path=output_dir / "database_scale_index_build_time.png",
+            log_y=True,
+        ),
+        _plot_database_scale_vector_dim(
+            metrics,
+            output_dir / "database_scale_vector_dim.png",
+        ),
+    ]
+    return saved_paths
+
+
 def _plot_bar(
     metrics: Sequence[Dict[str, float | int | str]],
     value_key: str,
@@ -92,7 +138,7 @@ def _plot_bar(
     labels = [str(item["scheme"]) for item in metrics]
     values = [float(item[value_key]) for item in metrics]
 
-    fig, ax = plt.subplots(figsize=(8.4, 5.0), dpi=160)
+    fig, ax = plt.subplots(figsize=(10.4, 5.4), dpi=160)
     bars = ax.bar(labels, values, color="#2563eb", alpha=0.82, label=ylabel)
     ax.set_title(title)
     ax.set_xlabel("Scheme")
@@ -102,7 +148,7 @@ def _plot_bar(
     ax.grid(True, axis="y", linestyle="--", alpha=0.35)
     ax.legend()
     ax.bar_label(bars, fmt="%.6g", padding=3)
-    fig.autofmt_xdate(rotation=15, ha="right")
+    fig.autofmt_xdate(rotation=25, ha="right")
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
@@ -121,6 +167,67 @@ def cleanup_old_ef_search_figures(output_dir: Path) -> None:
         path = ef_dir / filename
         if path.is_file():
             path.unlink()
+
+
+def _plot_database_scale_curve(
+    metrics: Sequence[Dict[str, float | int | str]],
+    value_key: str,
+    title: str,
+    ylabel: str,
+    output_path: Path,
+    y_limit: tuple[float, float] | None = None,
+    log_y: bool = False,
+) -> Path:
+    grouped: dict[str, list[Dict[str, float | int | str]]] = {}
+    for item in metrics:
+        grouped.setdefault(str(item["scheme"]), []).append(item)
+
+    fig, ax = plt.subplots(figsize=(10.2, 5.4), dpi=160)
+    for scheme, rows in grouped.items():
+        sorted_rows = sorted(rows, key=lambda row: int(row["sample_chunks"]))
+        x_values = [int(row["sample_chunks"]) for row in sorted_rows]
+        y_values = [float(row[value_key]) for row in sorted_rows]
+        ax.plot(x_values, y_values, marker="o", linewidth=2.0, label=scheme)
+
+    ax.set_title(title)
+    ax.set_xlabel("sample_chunks")
+    ax.set_ylabel(ylabel)
+    if y_limit is not None:
+        ax.set_ylim(*y_limit)
+    if log_y:
+        ax.set_yscale("log")
+    ax.grid(True, which="both", linestyle="--", alpha=0.35)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+    return output_path
+
+
+def _plot_database_scale_vector_dim(
+    metrics: Sequence[Dict[str, float | int | str]],
+    output_path: Path,
+) -> Path:
+    if not metrics:
+        return output_path
+    max_chunks = max(int(row["sample_chunks"]) for row in metrics)
+    rows = [row for row in metrics if int(row["sample_chunks"]) == max_chunks]
+    labels = [str(row["scheme"]) for row in rows]
+    values = [float(row["vector_dim"]) for row in rows]
+
+    fig, ax = plt.subplots(figsize=(10.4, 5.4), dpi=160)
+    bars = ax.bar(labels, values, color="#2563eb", alpha=0.82, label="Vector dimension")
+    ax.set_title(f"Vector Dimension by Scheme ({max_chunks} chunks)")
+    ax.set_xlabel("Scheme")
+    ax.set_ylabel("Vector dimension")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    ax.legend()
+    ax.bar_label(bars, fmt="%.6g", padding=3)
+    fig.autofmt_xdate(rotation=25, ha="right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+    return output_path
 
 
 def plot_validation_tuning_figures(
@@ -200,7 +307,7 @@ def _plot_ef_search_curve(
     for item in metrics:
         grouped.setdefault(str(item["scheme"]), []).append(item)
 
-    fig, ax = plt.subplots(figsize=(8.8, 5.2), dpi=160)
+    fig, ax = plt.subplots(figsize=(10.2, 5.4), dpi=160)
     for scheme, rows in grouped.items():
         sorted_rows = sorted(rows, key=lambda row: float(row["ef_search"]))
         x_values = [float(row["ef_search"]) for row in sorted_rows]

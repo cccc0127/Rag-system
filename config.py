@@ -18,6 +18,7 @@ class Config:
     JL_TARGET_DIM = 256
     JL_EPSILON = 0.3
     JL_RANDOM_SEED = 42
+    REPRESENTATION_MODE = "jl"  # 可选值: "jl", "no_jl"
     DP_DELTA = 1e-5
     DP_RANDOM_SEED = 42
     DP_UTILITY_SCALE = 0.01

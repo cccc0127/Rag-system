@@ -6,9 +6,11 @@ from typing import Dict, Sequence
 
 import numpy as np
 
-from dimension_reduction import JLProjector, l2_normalize
+from config import config
+from dimension_reduction import l2_normalize
 from gaussian_noise import AnalyticGaussianCalibrator, NoiseApplication
 from comparison_experiments.shared.types import SchemeOutput
+from representation_layer import RepresentationConfig, build_representation
 
 
 class OurDPRAGScheme:
@@ -19,19 +21,31 @@ class OurDPRAGScheme:
 
     def __init__(
         self,
-        jl_target_dim: int = 256,
-        jl_epsilon: float = 0.3,
-        jl_seed: int = 42,
+        representation_mode: str = config.REPRESENTATION_MODE,
+        jl_target_dim: int = config.JL_TARGET_DIM,
+        jl_epsilon: float = config.JL_EPSILON,
+        jl_seed: int = config.JL_RANDOM_SEED,
         dp_delta: float = 1e-5,
         utility_scale: float = 0.01,
         noise_seed: int = 42,
+        name: str | None = None,
     ):
+        self.representation_mode = str(representation_mode)
         self.jl_target_dim = int(jl_target_dim)
         self.jl_epsilon = float(jl_epsilon)
         self.jl_seed = int(jl_seed)
         self.dp_delta = float(dp_delta)
         self.utility_scale = float(utility_scale)
         self.noise_seed = int(noise_seed)
+        self.name = name or self._default_name()
+
+    def _default_name(self) -> str:
+        mode = self.representation_mode.strip().lower().replace("-", "_")
+        if mode == "no_jl":
+            return "Our DP-RAG-NoJL"
+        if mode == "jl":
+            return f"Our DP-RAG-JL{self.jl_target_dim}"
+        return "Our DP-RAG"
 
     def run(
         self,
@@ -39,13 +53,20 @@ class OurDPRAGScheme:
         query_embeddings: np.ndarray,
         chunk_records: Sequence[Dict[str, object]],
     ) -> SchemeOutput:
-        projector = JLProjector(
-            target_dim=self.jl_target_dim,
-            eps=self.jl_epsilon,
-            random_state=self.jl_seed,
+        representation = build_representation(
+            raw_embeddings=raw_embeddings,
+            query_embeddings=query_embeddings,
+            config=RepresentationConfig(
+                mode=self.representation_mode,
+                jl_target_dim=self.jl_target_dim,
+                jl_epsilon=self.jl_epsilon,
+                jl_random_seed=self.jl_seed,
+            ),
         )
-        reduced_embeddings = projector.fit_transform(raw_embeddings)
-        reduced_queries = projector.transform(query_embeddings)
+        reduced_embeddings = representation.document_vectors
+        reduced_queries = representation.query_vectors
+        if reduced_queries is None:
+            raise RuntimeError("Representation layer did not return query vectors.")
 
         calibrator = AnalyticGaussianCalibrator(
             delta=self.dp_delta,
@@ -75,13 +96,16 @@ class OurDPRAGScheme:
         metadata: Dict[str, float | int | str] = {
             "utility_scale": self.utility_scale,
             "dp_delta": self.dp_delta,
+            "representation_mode": representation.metadata["representation_mode"],
+            "representation_label": self.name,
             "jl_target_dim": self.jl_target_dim,
+            "jl_effective_target_dim": representation.metadata.get("jl_target_dim", ""),
             "mean_sigma": float(np.mean(sigmas)),
             "mean_epsilon": float(np.mean(epsilons)),
             "mean_noise_signal_ratio": float(np.mean(nsr)),
             "vector_dim": int(document_vectors.shape[1]),
             "uses_dp": True,
-            "uses_jl": True,
+            "uses_jl": bool(representation.metadata["uses_jl"]),
             "uses_encryption": False,
             "distance_metric": "cosine",
             "hnsw_space": "cosine",

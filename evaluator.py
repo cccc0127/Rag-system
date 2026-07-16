@@ -21,9 +21,10 @@ import numpy as np
 
 from chunk import iter_chunk_documents
 from config import config
-from dimension_reduction import JLProjector, l2_normalize
+from dimension_reduction import l2_normalize
 from gaussian_noise import AnalyticGaussianCalibrator, NoiseApplication
 from privacy_judge import PrivacyScorer
+from representation_layer import build_representation, parse_representation_config_from_args
 
 
 TEXT_LIKE_SUFFIXES = {"", ".txt", ".md", ".csv", ".log"}
@@ -43,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--chunk-size", type=int, default=getattr(config, "CHUNK_SIZE", 1000))
     parser.add_argument("--overlap", type=int, default=getattr(config, "OVERLAP", 200))
+    parser.add_argument("--representation-mode", default=getattr(config, "REPRESENTATION_MODE", "jl"))
     parser.add_argument("--jl-target-dim", type=int, default=getattr(config, "JL_TARGET_DIM", 256))
     parser.add_argument("--jl-epsilon", type=float, default=getattr(config, "JL_EPSILON", 0.3))
     parser.add_argument("--jl-seed", type=int, default=getattr(config, "JL_RANDOM_SEED", 42))
@@ -378,19 +380,20 @@ def prepare_evaluation_context(args: argparse.Namespace) -> Dict[str, object]:
         dtype=np.float32,
     )
 
-    projector = JLProjector(
-        target_dim=args.jl_target_dim,
-        eps=args.jl_epsilon,
-        random_state=args.jl_seed,
-    )
-    reduced_raw_embeddings = projector.fit_transform(raw_embeddings)
-
     queries = generate_random_queries(chunk_records, args.num_queries, args.query_seed)
     query_embeddings = np.asarray(
         embedding_model.encode(queries, batch_size=args.num_queries, show_progress_bar=False),
         dtype=np.float32,
     )
-    query_reduced = projector.transform(query_embeddings)
+    representation = build_representation(
+        raw_embeddings=raw_embeddings,
+        query_embeddings=query_embeddings,
+        config=parse_representation_config_from_args(args),
+    )
+    reduced_raw_embeddings = representation.document_vectors
+    query_reduced = representation.query_vectors
+    if query_reduced is None:
+        raise RuntimeError("Representation layer did not return query vectors.")
 
     return {
         "doc_counter": doc_counter,
@@ -399,6 +402,7 @@ def prepare_evaluation_context(args: argparse.Namespace) -> Dict[str, object]:
         "reduced_raw_embeddings": reduced_raw_embeddings,
         "queries": queries,
         "query_reduced": query_reduced,
+        "representation_metadata": representation.metadata,
     }
 
 
@@ -415,6 +419,7 @@ def evaluate_utility_scale(
     reduced_raw_embeddings = context["reduced_raw_embeddings"]
     queries = context["queries"]
     query_reduced = context["query_reduced"]
+    representation_metadata = context["representation_metadata"]
 
     assert isinstance(doc_counter, dict)
     assert isinstance(chunk_records, list)
@@ -422,6 +427,7 @@ def evaluate_utility_scale(
     assert isinstance(reduced_raw_embeddings, np.ndarray)
     assert isinstance(queries, list)
     assert isinstance(query_reduced, np.ndarray)
+    assert isinstance(representation_metadata, dict)
 
     calibrator = AnalyticGaussianCalibrator(
         delta=args.dp_delta,
@@ -515,7 +521,9 @@ def evaluate_utility_scale(
     print(f"Scanned readable documents: {doc_counter['count']}")
     print(f"Sampled chunks:             {len(chunk_records)}")
     print(f"Raw embedding shape:        {raw_embeddings.shape}")
-    print(f"JL raw embedding shape:     {reduced_raw_embeddings.shape}")
+    print(f"Representation mode:        {representation_metadata.get('representation_mode')}")
+    print(f"Representation vector dim:  {representation_metadata.get('vector_dim')}")
+    print(f"Retrieval embedding shape:  {reduced_raw_embeddings.shape}")
     print(f"Final noised shape:         {final_noised_embeddings.shape}")
     print(f"Queries:                    {len(queries)}")
     print(f"Top-K:                      {args.top_k}")

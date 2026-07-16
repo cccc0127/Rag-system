@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 Z" fill="#263238"/></marker>
+    <marker id="cyanArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 Z" fill="#42aeb5"/></marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity=".18"/></filter>
+    <style>
+      text{font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",sans-serif;fill:#172126}
+      .title{font-size:30px;font-weight:800}.sub{font-size:23px;font-weight:700}.body{font-size:18px}.small{font-size:15px}.tiny{font-size:13px}
+      .panel{fill:#b9cad5;stroke:#172126;stroke-width:4}.card{fill:#fff;stroke:#52636d;stroke-width:2}.cream{fill:#fff8e9;stroke:#e8b66d;stroke-width:2}
+      .cyan{fill:#d7f4f3;stroke:#42aeb5;stroke-width:2}.orange{fill:#fff0d6;stroke:#eaa84d;stroke-width:2}.red{fill:#f6b0aa;stroke:#db6c62;stroke-width:2}
+      .flow{fill:none;stroke:#263238;stroke-width:4;marker-end:url(#arrow)}.data{fill:none;stroke:#42aeb5;stroke-width:5;marker-end:url(#cyanArrow)}
+      .step{fill:#fff;stroke:#263238;stroke-width:2}.node{fill:#f7d9d6;stroke:#7d8a91;stroke-width:2}
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="#f5f7f8"/>
+
+  <!-- top -->
+  <rect class="panel" x="18" y="18" width="785" height="150" rx="8"/>
+  <text class="title" x="38" y="55">客户端</text>
+  <rect class="card" x="40" y="72" width="430" height="72" rx="6"/><text class="sub" x="58" y="101">输入：</text><text class="body" x="58" y="130">用户查询 q</text>
+  <rect class="card" x="500" y="72" width="270" height="72" rx="6"/><text class="sub" x="518" y="101">回答：</text><text class="body" x="518" y="130">生成结果</text>
+
+  <rect class="panel" x="835" y="18" width="747" height="150" rx="8"/>
+  <text class="title" x="855" y="55">隐私目标</text>
+  <rect class="card" x="875" y="78" width="180" height="62" rx="6"/><text class="sub" x="902" y="116">语义可用性</text>
+  <path class="flow" d="M1060 109 H1110"/><rect class="red" x="1120" y="70" width="180" height="76" rx="6"/><text class="sub" x="1155" y="104">差分隐私</text><text class="small" x="1170" y="131">(ε, δ)-DP</text>
+  <path class="flow" d="M1305 109 H1350"/><rect class="card" x="1360" y="78" width="180" height="62" rx="6"/><text class="sub" x="1397" y="116">高效检索</text>
+
+  <!-- service platform -->
+  <rect class="panel" x="18" y="190" width="1564" height="610" rx="8"/>
+  <text class="title" x="38" y="228">隐私增强 RAG 服务平台</text>
+  <rect x="40" y="245" width="970" height="38" rx="12" fill="#dce8ed"/><text class="sub" x="470" y="272">离线建库</text>
+  <rect x="1030" y="245" width="530" height="38" rx="12" fill="#dce8ed"/><text class="sub" x="1240" y="272">在线问答</text>
+
+  <!-- offline cards -->
+  <rect class="card" filter="url(#shadow)" x="45" y="315" width="205" height="125" rx="10"/><text class="sub" x="66" y="353">① 文档加载与</text><text class="sub" x="88" y="382">重叠分块</text><rect class="cream" x="78" y="398" width="140" height="28" rx="8"/><text class="small" x="91" y="418">Chunk + overlap</text>
+  <path class="data" d="M250 377 H285"/>
+  <rect class="card" filter="url(#shadow)" x="295" y="300" width="250" height="190" rx="10"/><text class="sub" x="317" y="336">② 混合隐私敏感度评估</text>
+  <rect class="cyan" x="320" y="354" width="92" height="30" rx="10"/><text class="small" x="334" y="375">正则匹配</text><rect class="cyan" x="422" y="354" width="98" height="30" rx="10"/><text class="small" x="436" y="375">关键词规则</text>
+  <rect class="cyan" x="355" y="394" width="145" height="30" rx="10"/><text class="small" x="370" y="415">零样本语义分类</text><rect class="orange" x="329" y="442" width="184" height="32" rx="10"/><text class="small" x="342" y="464">敏感分数 sᵢ ∈ [0.1,10]</text>
+  <path class="data" d="M545 394 H580"/>
+  <rect class="card" filter="url(#shadow)" x="590" y="315" width="210" height="155" rx="10"/><text class="sub" x="624" y="350">③ 统一表征层</text><rect class="cyan" x="616" y="368" width="158" height="30" rx="8"/><text class="body" x="641" y="390">L2 归一化</text><rect class="cyan" x="616" y="408" width="158" height="30" rx="8"/><text class="body" x="627" y="430">JL 随机投影 d → m</text><text class="small" x="625" y="458">yᵢ = norm(xᵢR)</text>
+  <path class="data" d="M800 394 H835"/>
+  <rect class="orange" filter="url(#shadow)" x="845" y="292" width="320" height="245" rx="10"/><text class="sub" x="891" y="328">④ 动态解析高斯机制</text><text class="body" x="875" y="363">L2 裁剪：vᵢ / max(1, ‖vᵢ‖₂)</text><text class="body" x="875" y="397">εᵢ = 1.25 + 8.75(1-sᵢ)¹·⁵</text><text class="body" x="875" y="431">Δᵢ = 0.25 + 0.25sᵢ</text><text class="body" x="875" y="465">σᵢ = u*Δᵢ</text><text class="body" x="875" y="499">z ~ N(0,(σᵢ·α/√m)²I)</text>
+  <rect class="red" x="882" y="548" width="250" height="35" rx="8"/><text class="small" x="898" y="571">敏感度越高 → εᵢ越小、噪声越强</text>
+  <path class="data" d="M1000 585 V620 H915"/>
+  <rect class="card" filter="url(#shadow)" x="705" y="625" width="325" height="125" rx="10"/><text class="sub" x="731" y="660">⑤ 最终归一化与 HNSW 建索引</text><text class="body" x="755" y="696">隐私向量库</text>
+  <g transform="translate(910 690)"><line x1="0" y1="0" x2="50" y2="-20" stroke="#657780" stroke-width="2"/><line x1="0" y1="0" x2="55" y2="25" stroke="#657780" stroke-width="2"/><line x1="50" y1="-20" x2="55" y2="25" stroke="#657780" stroke-width="2"/><circle class="node" cx="0" cy="0" r="10"/><circle class="node" cx="50" cy="-20" r="10"/><circle class="node" cx="55" cy="25" r="10"/></g>
+
+  <!-- online -->
+  <path class="flow" d="M600 145 V220 H1215 V305"/>
+  <rect class="card" filter="url(#shadow)" x="1190" y="315" width="330" height="105" rx="10"/><text class="sub" x="1220" y="350">⑥ 查询编码</text><text class="body" x="1220" y="385">q → Embedding → 同一 JL 投影</text>
+  <path class="flow" d="M1355 420 V454"/><path d="M1355 455 L1460 515 L1355 575 L1250 515 Z" fill="#fff8e9" stroke="#263238" stroke-width="3"/><text class="sub" x="1272" y="510">⑦ HNSW 近似检索</text><text class="body" x="1327" y="540">Top-K</text>
+  <path class="flow" d="M1250 515 H1045 V685 H1035"/>
+  <path class="flow" d="M1355 575 V610"/><rect class="card" filter="url(#shadow)" x="1180" y="620" width="350" height="125" rx="10"/><text class="sub" x="1210" y="656">⑧ 上下文构建</text><text class="body" x="1210" y="694">检索片段 + Identity / Prompt</text><text class="small" x="1210" y="722">仅返回 Top-K 相关知识片段</text>
+  <path class="flow" d="M1355 745 V825"/>
+
+  <!-- bottom providers -->
+  <rect x="70" y="820" width="650" height="155" rx="35" fill="#f8f7ff" stroke="#151b22" stroke-width="5"/>
+  <text class="sub" x="258" y="852">知识库与模型提供方</text><rect class="card" x="105" y="870" width="260" height="78" rx="10"/><text class="body" x="135" y="906">多格式私有文档</text><text class="small" x="135" y="930">PDF / DOCX / TXT / XLSX</text><rect class="card" x="405" y="870" width="270" height="78" rx="10"/><text class="body" x="475" y="906">嵌入模型</text><text class="small" x="458" y="930">SentenceTransformer</text>
+  <path class="data" d="M235 870 V780 H145 V445"/><path class="data" d="M540 870 V770 H695 V475"/>
+  <rect x="1010" y="820" width="500" height="155" rx="35" fill="#f8f7ff" stroke="#151b22" stroke-width="5"/>
+  <text class="sub" x="1160" y="852">本地生成模型</text><rect class="card" x="1050" y="870" width="190" height="78" rx="10"/><text class="sub" x="1119" y="916">LLM</text><rect class="card" x="1270" y="870" width="200" height="78" rx="10"/><text class="body" x="1310" y="904">Prompt</text><text class="small" x="1300" y="930">上下文 + 用户问题</text>
+  <path class="flow" d="M1010 900 H980 V870 H600 V170"/>
+</svg>
