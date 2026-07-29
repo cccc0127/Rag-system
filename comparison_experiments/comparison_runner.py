@@ -25,7 +25,11 @@ from comparison_experiments.comparison_config import (
     DEFAULT_TOP_K,
     TEST_QUERY_SEED,
 )
-from comparison_experiments.plotting import cleanup_old_ef_search_figures, plot_comparison_figures
+from comparison_experiments.plotting import (
+    cleanup_old_ef_search_figures,
+    plot_ckks_figures,
+    plot_comparison_figures,
+)
 from comparison_experiments.shared.context import add_context_args, prepare_comparison_context
 from comparison_experiments.shared.metrics import compute_scheme_metrics
 from comparison_experiments.shared.report import (
@@ -36,12 +40,21 @@ from comparison_experiments.shared.report import (
 )
 from comparison_experiments.shared.retrievers import (
     RetrievalResult,
+    run_ckks_full_scan_retrieval,
+    run_hnsw_ckks_refine_retrieval,
     run_hnsw_filter_refine_retrieval,
     run_hnsw_retrieval,
+)
+from comparison_experiments.shared.ckks_utils import (
+    DEFAULT_CKKS_COEFF_MOD_BIT_SIZES,
+    DEFAULT_CKKS_GLOBAL_SCALE,
+    DEFAULT_CKKS_POLY_MODULUS_DEGREE,
+    parse_coeff_mod_bit_sizes,
 )
 from comparison_experiments.shared.types import SchemeOutput
 from comparison_experiments.schemes.dcpe_dce import DCPEDCEScheme
 from comparison_experiments.schemes.our_dp_rag import OurDPRAGScheme
+from comparison_experiments.schemes.partial_homomorphic_ckks import PartialHomomorphicCKKSScheme
 
 
 RESULTS_DIR = ROOT_DIR / "comparison_experiments" / "results"
@@ -76,6 +89,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dcpe-beta", type=float, default=0.5)
     parser.add_argument("--dcpe-ratio-k", type=int, default=4)
     parser.add_argument("--dcpe-seed", type=int, default=42)
+    parser.add_argument("--enable-ckks-fullscan", action="store_true")
+    parser.add_argument("--enable-ckks-refine", action="store_true")
+    parser.add_argument("--ckks-poly-modulus-degree", type=int, default=DEFAULT_CKKS_POLY_MODULUS_DEGREE)
+    parser.add_argument(
+        "--ckks-coeff-mod-bit-sizes",
+        default=",".join(str(value) for value in DEFAULT_CKKS_COEFF_MOD_BIT_SIZES),
+    )
+    parser.add_argument("--ckks-global-scale", type=float, default=DEFAULT_CKKS_GLOBAL_SCALE)
+    parser.add_argument("--ckks-ratio-k", type=int, default=4)
     parser.add_argument("--recommended-params", type=Path, default=DEFAULT_RECOMMENDED_PARAMS)
     parser.add_argument("--no-recommended-params", action="store_true")
     parser.add_argument("--our-variants", default=DEFAULT_OUR_VARIANTS)
@@ -111,7 +133,10 @@ def run(args: argparse.Namespace) -> None:
         )
         default_retrieval = None
         default_metrics = None
-        for ef_search in ef_search_list:
+        scheme_ef_search_list = ef_search_list
+        if scheme_output.backend_type == "ckks_full_scan":
+            scheme_ef_search_list = [int(args.ef_search)]
+        for ef_search in scheme_ef_search_list:
             retrieval = run_scheme_retrieval(
                 scheme_output=scheme_output,
                 top_k=args.top_k,
@@ -150,6 +175,13 @@ def run(args: argparse.Namespace) -> None:
         all_metrics,
         PICTURE_DIR,
         default_ef_search=int(args.ef_search),
+    )
+    figure_paths.extend(
+        plot_ckks_figures(
+            all_metrics,
+            PICTURE_DIR,
+            default_ef_search=int(args.ef_search),
+        )
     )
 
     if args.verbose:
@@ -231,6 +263,32 @@ def run_scheme_retrieval(
             ef_construction=ef_construction,
             space=hnsw_space,
             random_seed=random_seed,
+        )
+    if scheme_output.backend_type == "ckks_full_scan":
+        return run_ckks_full_scan_retrieval(
+            document_vectors=scheme_output.document_vectors,
+            query_vectors=scheme_output.query_vectors,
+            top_k=max(top_k, 5),
+            poly_modulus_degree=int(scheme_output.metadata["poly_modulus_degree"]),
+            coeff_mod_bit_sizes=parse_coeff_mod_bit_sizes(str(scheme_output.metadata["coeff_mod_bit_sizes"])),
+            global_scale=float(scheme_output.metadata["global_scale"]),
+        )
+    if scheme_output.backend_type == "hnsw_ckks_refine":
+        ratio_k = int(float(scheme_output.metadata.get("ratio_k", 4)))
+        k_prime = max(top_k, ratio_k * top_k)
+        return run_hnsw_ckks_refine_retrieval(
+            document_vectors=scheme_output.document_vectors,
+            query_vectors=scheme_output.query_vectors,
+            top_k=max(top_k, 5),
+            k_prime=max(k_prime, 5),
+            ef_search=ef_search,
+            M=M,
+            ef_construction=ef_construction,
+            space=hnsw_space,
+            random_seed=random_seed,
+            poly_modulus_degree=int(scheme_output.metadata["poly_modulus_degree"]),
+            coeff_mod_bit_sizes=parse_coeff_mod_bit_sizes(str(scheme_output.metadata["coeff_mod_bit_sizes"])),
+            global_scale=float(scheme_output.metadata["global_scale"]),
         )
 
     return run_hnsw_retrieval(
@@ -338,6 +396,37 @@ def build_schemes(
                 beta=args.dcpe_beta,
                 ratio_k=args.dcpe_ratio_k,
                 random_seed=args.dcpe_seed,
+            )
+        )
+    ckks_coeff_mod_bit_sizes = parse_coeff_mod_bit_sizes(
+        getattr(args, "ckks_coeff_mod_bit_sizes", DEFAULT_CKKS_COEFF_MOD_BIT_SIZES)
+    )
+    if getattr(args, "enable_ckks_fullscan", False):
+        schemes.append(
+            PartialHomomorphicCKKSScheme(
+                mode="fullscan",
+                poly_modulus_degree=getattr(
+                    args,
+                    "ckks_poly_modulus_degree",
+                    DEFAULT_CKKS_POLY_MODULUS_DEGREE,
+                ),
+                coeff_mod_bit_sizes=ckks_coeff_mod_bit_sizes,
+                global_scale=getattr(args, "ckks_global_scale", DEFAULT_CKKS_GLOBAL_SCALE),
+                ratio_k=getattr(args, "ckks_ratio_k", 4),
+            )
+        )
+    if getattr(args, "enable_ckks_refine", False):
+        schemes.append(
+            PartialHomomorphicCKKSScheme(
+                mode="refine",
+                poly_modulus_degree=getattr(
+                    args,
+                    "ckks_poly_modulus_degree",
+                    DEFAULT_CKKS_POLY_MODULUS_DEGREE,
+                ),
+                coeff_mod_bit_sizes=ckks_coeff_mod_bit_sizes,
+                global_scale=getattr(args, "ckks_global_scale", DEFAULT_CKKS_GLOBAL_SCALE),
+                ratio_k=getattr(args, "ckks_ratio_k", 4),
             )
         )
     return schemes

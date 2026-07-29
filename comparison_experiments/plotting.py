@@ -51,10 +51,11 @@ def plot_comparison_figures(
             output_path=default_dir / "comparison_vector_dim.png",
         ),
     ]
+    ef_metrics = _non_ckks_rows(metrics)
     saved_paths.extend(
         [
             _plot_ef_search_curve(
-                metrics,
+                ef_metrics,
                 value_key="hnsw_recall_at_5",
                 title="HNSW Recall@5 across ef_search",
                 ylabel="Recall@5",
@@ -62,7 +63,7 @@ def plot_comparison_figures(
                 y_limit=(0.0, 1.1),
             ),
             _plot_ef_search_curve(
-                metrics,
+                ef_metrics,
                 value_key="hnsw_mrr_at_5",
                 title="HNSW MRR@5 across ef_search",
                 ylabel="MRR@5",
@@ -70,13 +71,78 @@ def plot_comparison_figures(
                 y_limit=(0.0, 1.1),
             ),
             _plot_ef_search_curve(
-                metrics,
+                ef_metrics,
                 value_key="mean_query_time",
                 title="Mean Query Time across ef_search",
                 ylabel="Mean query time (seconds)",
                 output_path=ef_dir / "comparison_ef_search_query_time.png",
             ),
         ]
+    )
+    return saved_paths
+
+
+def plot_ckks_figures(
+    metrics: Sequence[Dict[str, float | int | str]],
+    output_dir: Path,
+    default_ef_search: int,
+) -> list[Path]:
+    ckks_dir = output_dir / "ckks"
+    default_metrics = _select_default_metrics(_ckks_rows(metrics), default_ef_search)
+    if not default_metrics:
+        return []
+
+    rows_with_he_time = _with_ckks_he_time(default_metrics)
+    ckks_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    saved_paths.extend(
+        _maybe_plot_ckks_bar(
+            default_metrics,
+            value_key="he_relative_error_mean",
+            title="CKKS Mean HE Relative Error",
+            ylabel="Mean HE relative error",
+            output_path=ckks_dir / "ckks_he_relative_error.png",
+            log_y=True,
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_bar(
+            default_metrics,
+            value_key="he_absolute_error_mean",
+            title="CKKS Mean HE Absolute Error",
+            ylabel="Mean HE absolute error",
+            output_path=ckks_dir / "ckks_he_absolute_error.png",
+            log_y=True,
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_bar(
+            default_metrics,
+            value_key="cipher_expansion_ratio",
+            title="CKKS Cipher/Plain Expansion Ratio",
+            ylabel="Cipher/plain expansion ratio",
+            output_path=ckks_dir / "ckks_cipher_expansion_ratio.png",
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_bar(
+            default_metrics,
+            value_key="ciphertext_size_kb",
+            title="CKKS Mean Ciphertext Size",
+            ylabel="Mean ciphertext size (KB)",
+            output_path=ckks_dir / "ckks_ciphertext_size.png",
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_bar(
+            rows_with_he_time,
+            value_key="ckks_he_time",
+            title="CKKS Mean HE Computation Time",
+            ylabel="Mean HE computation time (seconds)",
+            output_path=ckks_dir / "ckks_he_time.png",
+            log_y=True,
+        )
     )
     return saved_paths
 
@@ -127,6 +193,60 @@ def plot_database_scale_figures(
     return saved_paths
 
 
+def plot_ckks_database_scale_figures(
+    metrics: Sequence[Dict[str, float | int | str]],
+    output_dir: Path,
+) -> list[Path]:
+    ckks_metrics = _ckks_rows(metrics)
+    if not ckks_metrics:
+        return []
+    ckks_dir = output_dir / "ckks"
+    ckks_dir.mkdir(parents=True, exist_ok=True)
+    rows_with_he_time = _with_ckks_he_time(ckks_metrics)
+
+    saved_paths: list[Path] = []
+    saved_paths.extend(
+        _maybe_plot_ckks_scale_curve(
+            ckks_metrics,
+            value_key="mean_query_time",
+            title="CKKS Database Scale: Mean Query Time",
+            ylabel="Mean query time (seconds)",
+            output_path=ckks_dir / "ckks_scale_query_time.png",
+            log_y=True,
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_scale_curve(
+            rows_with_he_time,
+            value_key="ckks_he_time",
+            title="CKKS Database Scale: HE Computation Time",
+            ylabel="Mean HE computation time (seconds)",
+            output_path=ckks_dir / "ckks_scale_he_time.png",
+            log_y=True,
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_scale_curve(
+            ckks_metrics,
+            value_key="cipher_expansion_ratio",
+            title="CKKS Database Scale: Cipher/Plain Expansion Ratio",
+            ylabel="Cipher/plain expansion ratio",
+            output_path=ckks_dir / "ckks_scale_cipher_expansion_ratio.png",
+        )
+    )
+    saved_paths.extend(
+        _maybe_plot_ckks_scale_curve(
+            ckks_metrics,
+            value_key="he_relative_error_mean",
+            title="CKKS Database Scale: Mean HE Relative Error",
+            ylabel="Mean HE relative error",
+            output_path=ckks_dir / "ckks_scale_relative_error.png",
+            log_y=True,
+        )
+    )
+    return saved_paths
+
+
 def _plot_bar(
     metrics: Sequence[Dict[str, float | int | str]],
     value_key: str,
@@ -134,6 +254,7 @@ def _plot_bar(
     ylabel: str,
     output_path: Path,
     y_limit: tuple[float, float] | None = None,
+    log_y: bool = False,
 ) -> Path:
     labels = [str(item["scheme"]) for item in metrics]
     values = [float(item[value_key]) for item in metrics]
@@ -145,6 +266,8 @@ def _plot_bar(
     ax.set_ylabel(ylabel)
     if y_limit is not None:
         ax.set_ylim(*y_limit)
+    if log_y:
+        ax.set_yscale("log")
     ax.grid(True, axis="y", linestyle="--", alpha=0.35)
     ax.legend()
     ax.bar_label(bars, fmt="%.6g", padding=3)
@@ -202,6 +325,111 @@ def _plot_database_scale_curve(
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
     return output_path
+
+
+def _maybe_plot_ckks_bar(
+    metrics: Sequence[Dict[str, float | int | str]],
+    value_key: str,
+    title: str,
+    ylabel: str,
+    output_path: Path,
+    log_y: bool = False,
+) -> list[Path]:
+    rows = _valid_metric_rows(metrics, value_key, positive=log_y)
+    if not rows:
+        return []
+    return [
+        _plot_bar(
+            rows,
+            value_key=value_key,
+            title=title,
+            ylabel=ylabel,
+            output_path=output_path,
+            log_y=log_y,
+        )
+    ]
+
+
+def _maybe_plot_ckks_scale_curve(
+    metrics: Sequence[Dict[str, float | int | str]],
+    value_key: str,
+    title: str,
+    ylabel: str,
+    output_path: Path,
+    log_y: bool = False,
+) -> list[Path]:
+    rows = _valid_metric_rows(metrics, value_key, positive=log_y)
+    if not rows:
+        return []
+    return [
+        _plot_database_scale_curve(
+            rows,
+            value_key=value_key,
+            title=title,
+            ylabel=ylabel,
+            output_path=output_path,
+            log_y=log_y,
+        )
+    ]
+
+
+def _ckks_rows(metrics: Sequence[Dict[str, float | int | str]]) -> list[Dict[str, float | int | str]]:
+    return [row for row in metrics if "CKKS" in str(row.get("scheme", ""))]
+
+
+def _non_ckks_rows(metrics: Sequence[Dict[str, float | int | str]]) -> list[Dict[str, float | int | str]]:
+    return [row for row in metrics if "CKKS" not in str(row.get("scheme", ""))]
+
+
+def _with_ckks_he_time(
+    metrics: Sequence[Dict[str, float | int | str]],
+) -> list[Dict[str, float | int | str]]:
+    rows: list[Dict[str, float | int | str]] = []
+    for row in metrics:
+        he_time = _first_valid_float(row, ("he_scan_time", "he_refine_time"))
+        if he_time is None:
+            continue
+        new_row = dict(row)
+        new_row["ckks_he_time"] = he_time
+        rows.append(new_row)
+    return rows
+
+
+def _valid_metric_rows(
+    metrics: Sequence[Dict[str, float | int | str]],
+    value_key: str,
+    positive: bool = False,
+) -> list[Dict[str, float | int | str]]:
+    rows: list[Dict[str, float | int | str]] = []
+    for row in metrics:
+        value = _float_or_none(row.get(value_key))
+        if value is None:
+            continue
+        if positive and value <= 0.0:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _first_valid_float(
+    row: Dict[str, float | int | str],
+    keys: Sequence[str],
+) -> float | None:
+    for key in keys:
+        value = _float_or_none(row.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
 
 
 def _plot_database_scale_vector_dim(

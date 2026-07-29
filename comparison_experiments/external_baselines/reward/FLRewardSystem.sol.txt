@@ -1,0 +1,58 @@
+pragma solidity ^0.4.25;
+
+contract FLRewardSystem {
+    // 账本：记录每个节点的钱包地址及其累积的 Token 余额
+    mapping(address => uint256) public balances;
+    
+    // 事件：用于在区块链日志中记录奖励分配结果，方便论文数据回收
+    event RewardDistributed(address node, uint256 amount, uint256 timestamp);
+
+    /**
+     * @dev 执行 Token 奖励分配（核心函数）
+     * @param nodes 参与本轮训练的节点地址列表
+     * @param scores 放大 10000 倍后的整数余弦相似度分数
+     * @param threshold 放大 10000 倍后的动态生死线
+     * @param totalBounty 本轮智能合约发放的总奖金池 (例如 100 个 Token)
+     */
+    function distributeRewards(
+        address[] nodes, 
+        uint256[] scores, 
+        uint256 threshold, 
+        uint256 totalBounty
+    ) public {
+        require(nodes.length == scores.length, "Nodes and scores length mismatch");
+
+        uint256[] memory effectiveScores = new uint256[](nodes.length);
+        uint256 totalEffectiveScore = 0;
+
+        // 1. 动态过滤逻辑：跌破生死线的节点，得分直接记为 0
+        for (uint256 i = 0; i < nodes.length; i++) {
+            if (scores[i] >= threshold) {
+                // 计算相对得分，进一步拉开差距
+                effectiveScores[i] = scores[i] - threshold;
+                totalEffectiveScore += effectiveScores[i];
+            } else {
+                effectiveScores[i] = 0;
+            }
+        }
+
+        // 2. 比例结算逻辑：只有贡献达标的节点才能瓜分奖金池
+        if (totalEffectiveScore > 0) {
+            for (uint256 j = 0; j < nodes.length; j++) {
+                if (effectiveScores[j] > 0) {
+                    // 计算该节点应得的 Token：(个人相对得分 / 总有效得分) * 总奖池
+                    uint256 reward = (effectiveScores[j] * totalBounty) / totalEffectiveScore;
+                    balances[nodes[j]] += reward;
+                    
+                    // 触发事件，方便链下收集 Gas 和时间数据
+                    emit RewardDistributed(nodes[j], reward, now);
+                }
+            }
+        }
+    }
+
+    // 查询特定节点的余额
+    function getBalance(address node) public view returns (uint256) {
+        return balances[node];
+    }
+}

@@ -49,7 +49,38 @@ def compute_scheme_metrics(
         "sap_noise_signal_ratio": _metadata_float(scheme_output, "sap_noise_signal_ratio"),
         "beta": _metadata_float(scheme_output, "beta"),
         "ratio_k": _metadata_float(scheme_output, "ratio_k"),
+        "he_absolute_error_mean": _retrieval_or_metadata_float(
+            retrieval,
+            scheme_output,
+            "he_absolute_error_mean",
+        ),
+        "he_relative_error_mean": _retrieval_or_metadata_float(
+            retrieval,
+            scheme_output,
+            "he_relative_error_mean",
+        ),
+        "he_scan_time": _retrieval_or_metadata_float(retrieval, scheme_output, "he_scan_time"),
+        "he_refine_time": _retrieval_or_metadata_float(retrieval, scheme_output, "he_refine_time"),
+        "ciphertext_size_kb": _retrieval_or_metadata_float(
+            retrieval,
+            scheme_output,
+            "ciphertext_size_kb",
+        ),
+        "plain_size_kb": _retrieval_or_metadata_float(retrieval, scheme_output, "plain_size_kb"),
+        "cipher_expansion_ratio": _retrieval_or_metadata_float(
+            retrieval,
+            scheme_output,
+            "cipher_expansion_ratio",
+        ),
     }
+    if retrieval.metadata:
+        metrics.update(
+            {
+                f"retrieval_{key}": value
+                for key, value in retrieval.metadata.items()
+                if isinstance(value, (int, float, str))
+            }
+        )
     metrics.update(
         {
             f"metadata_{key}": value
@@ -66,6 +97,19 @@ def _metadata_float(scheme_output: SchemeOutput, key: str) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _retrieval_or_metadata_float(
+    retrieval: RetrievalResult,
+    scheme_output: SchemeOutput,
+    key: str,
+) -> float:
+    if retrieval.metadata and key in retrieval.metadata:
+        try:
+            return float(retrieval.metadata[key])
+        except (TypeError, ValueError):
+            return float("nan")
+    return _metadata_float(scheme_output, key)
 
 
 def _mean_overlap(reference_topk: np.ndarray, candidate_topk: np.ndarray, k: int) -> float:

@@ -28,13 +28,21 @@ from comparison_experiments.comparison_runner import (  # noqa: E402
     build_schemes,
     run_scheme_retrieval,
 )
-from comparison_experiments.plotting import plot_database_scale_figures  # noqa: E402
+from comparison_experiments.plotting import (  # noqa: E402
+    plot_ckks_database_scale_figures,
+    plot_database_scale_figures,
+)
 from comparison_experiments.shared.context import (  # noqa: E402
     add_context_args,
     prepare_comparison_context,
 )
 from comparison_experiments.shared.metrics import compute_scheme_metrics  # noqa: E402
 from comparison_experiments.shared.report import print_table  # noqa: E402
+from comparison_experiments.shared.ckks_utils import (  # noqa: E402
+    DEFAULT_CKKS_COEFF_MOD_BIT_SIZES,
+    DEFAULT_CKKS_GLOBAL_SCALE,
+    DEFAULT_CKKS_POLY_MODULUS_DEGREE,
+)
 from config import config  # noqa: E402
 
 
@@ -69,6 +77,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dcpe-beta", type=float, default=0.5)
     parser.add_argument("--dcpe-ratio-k", type=int, default=4)
     parser.add_argument("--dcpe-seed", type=int, default=42)
+    parser.add_argument("--enable-ckks-fullscan", action="store_true")
+    parser.add_argument("--enable-ckks-refine", action="store_true")
+    parser.add_argument("--ckks-poly-modulus-degree", type=int, default=DEFAULT_CKKS_POLY_MODULUS_DEGREE)
+    parser.add_argument(
+        "--ckks-coeff-mod-bit-sizes",
+        default=",".join(str(value) for value in DEFAULT_CKKS_COEFF_MOD_BIT_SIZES),
+    )
+    parser.add_argument("--ckks-global-scale", type=float, default=DEFAULT_CKKS_GLOBAL_SCALE)
+    parser.add_argument("--ckks-ratio-k", type=int, default=4)
     parser.add_argument("--recommended-params", type=Path, default=DEFAULT_RECOMMENDED_PARAMS)
     parser.add_argument("--no-recommended-params", action="store_true")
     parser.add_argument("--our-variants", default=DEFAULT_OUR_VARIANTS)
@@ -132,6 +149,7 @@ def run(args: argparse.Namespace) -> None:
 
     save_metrics_csv(all_metrics, RESULTS_CSV)
     figure_paths = plot_database_scale_figures(all_metrics, PICTURE_DIR)
+    figure_paths.extend(plot_ckks_database_scale_figures(all_metrics, PICTURE_DIR))
 
     print("\nSaved database scale results:")
     print(f"- {RESULTS_CSV}")
