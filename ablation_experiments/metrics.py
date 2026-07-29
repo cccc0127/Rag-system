@@ -17,6 +17,8 @@ def evaluate_scheme_metrics(
     reduced_raw_embeddings: np.ndarray,
     query_reduced: np.ndarray,
     utility_scale: float,
+    metadata: Dict[str, float | str | bool] | None = None,
+    hnsw_config: Dict[str, float | int | str] | None = None,
 ) -> Dict[str, float | str]:
     signal_norms = _l2_norms(scheme_output.signal_vectors)
     noise_norms = _l2_norms(scheme_output.noise_vectors)
@@ -30,18 +32,43 @@ def evaluate_scheme_metrics(
     max_drift_values: list[float] = []
     raw_times: list[float] = []
     noised_times: list[float] = []
+    raw_top_rows: np.ndarray | None = None
+    noised_top_rows: np.ndarray | None = None
+    hnsw_index_build_time = float("nan")
+
+    if hnsw_config is not None:
+        from comparison_experiments.shared.retrievers import run_hnsw_retrieval
+
+        retrieval_depth = min(10, reduced_raw_embeddings.shape[0])
+        common_args = {
+            "top_k": retrieval_depth,
+            "ef_search": int(hnsw_config["ef_search"]),
+            "M": int(hnsw_config["M"]),
+            "ef_construction": int(hnsw_config["ef_construction"]),
+            "space": str(hnsw_config["space"]),
+            "random_seed": int(hnsw_config["random_seed"]),
+        }
+        raw_retrieval = run_hnsw_retrieval(reduced_raw_embeddings, query_reduced, **common_args)
+        noised_retrieval = run_hnsw_retrieval(scheme_output.vectors, query_reduced, **common_args)
+        raw_top_rows = raw_retrieval.topk_indices
+        noised_top_rows = noised_retrieval.topk_indices
+        raw_times = raw_retrieval.query_times.tolist()
+        noised_times = noised_retrieval.query_times.tolist()
+        hnsw_index_build_time = float(noised_retrieval.index_build_time)
 
     retrieval_depth = 10
-    for query_vec in query_reduced:
+    for query_id, query_vec in enumerate(query_reduced):
         raw_start = time.perf_counter()
         raw_scores = cosine_scores(query_vec, reduced_raw_embeddings)
-        raw_top = top_k_indices(raw_scores, retrieval_depth)
-        raw_times.append(time.perf_counter() - raw_start)
+        raw_top = top_k_indices(raw_scores, retrieval_depth) if raw_top_rows is None else raw_top_rows[query_id]
+        if raw_top_rows is None:
+            raw_times.append(time.perf_counter() - raw_start)
 
         noised_start = time.perf_counter()
         noised_scores = cosine_scores(query_vec, scheme_output.vectors)
-        noised_top = top_k_indices(noised_scores, retrieval_depth)
-        noised_times.append(time.perf_counter() - noised_start)
+        noised_top = top_k_indices(noised_scores, retrieval_depth) if noised_top_rows is None else noised_top_rows[query_id]
+        if noised_top_rows is None:
+            noised_times.append(time.perf_counter() - noised_start)
 
         for k in overlap_values:
             overlap_values[k].append(_overlap_at_k(raw_top, noised_top, k))
@@ -51,7 +78,7 @@ def evaluate_scheme_metrics(
         mean_drift_values.append(float(np.mean(abs_drift)))
         max_drift_values.append(float(np.max(abs_drift)))
 
-    return {
+    result: Dict[str, float | str | bool] = {
         "scheme": scheme_output.name,
         "utility_scale": float(utility_scale),
         "mean_nsr": float(np.mean(nsr)),
@@ -72,7 +99,11 @@ def evaluate_scheme_metrics(
         "mean_sigma_per_dim": _nanmean(scheme_output.sigma_per_dim),
         "mean_epsilon": _nanmean(scheme_output.epsilons),
         "min_epsilon": _nanmin(scheme_output.epsilons),
+        "hnsw_index_build_time": hnsw_index_build_time,
     }
+    if metadata:
+        result.update(metadata)
+    return result
 
 
 def metric_rows(results: Sequence[Dict[str, float | str]]) -> list[list[object]]:

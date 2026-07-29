@@ -177,6 +177,23 @@ def sample_chunks(
 
 
 def load_embedding_model(model_path: str):
+    # Transformers newer than the system Pillow expect Image.Resampling,
+    # introduced after Pillow 9.0.  Keep the project runnable on the bundled
+    # Pillow without changing model or embedding behavior.
+    try:
+        from PIL import Image
+
+        if not hasattr(Image, "Resampling"):
+            Image.Resampling = type(  # type: ignore[attr-defined]
+                "Resampling",
+                (),
+                {
+                    name: getattr(Image, name)
+                    for name in ("NEAREST", "BILINEAR", "BICUBIC", "LANCZOS", "HAMMING", "BOX")
+                },
+            )
+    except ImportError:
+        pass
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as exc:

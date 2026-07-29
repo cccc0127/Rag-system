@@ -26,6 +26,20 @@ PLOT_SPECS = [
     ("dp_noise_time", "ablation_dp_noise_time_curve.png", "DP Noise Time", "Seconds", False, None),
 ]
 
+NO_JL_PLOT_SPECS = [
+    ("mean_mrr5", "no_jl_ablation_mrr_at_5_curve.png", "No-JL Ablation: Mean MRR@5", "MRR@5", False, (0.0, 1.1)),
+    ("mean_overlap5", "no_jl_ablation_overlap_at_5_curve.png", "No-JL Ablation: Mean Overlap@5", "Overlap@5", False, (0.0, 1.1)),
+    ("mean_nsr", "no_jl_ablation_noise_signal_ratio_curve.png", "No-JL Ablation: Mean Noise/Signal Ratio", "Mean NSR", True, None),
+    ("mean_direction_cosine", "no_jl_ablation_direction_cosine_curve.png", "No-JL Ablation: Mean Direction Cosine", "Direction Cosine", False, (0.0, 1.1)),
+]
+
+NO_JL_STYLES = {
+    "Full Current NoJL": {"color": "#167C80", "marker": "o", "zorder": 4},
+    "No DP Baseline NoJL": {"color": "#355CDE", "marker": "s", "zorder": 3},
+    "No Dimension-Aware Scaling NoJL": {"color": "#C0392B", "marker": "*", "zorder": 6},
+    "Fixed DP Calibration NoJL": {"color": "#8E5DA2", "marker": "^", "zorder": 5},
+}
+
 
 def plot_all(results: Sequence[Dict[str, float | str]], result_dir: Path) -> list[Path]:
     result_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +52,42 @@ def plot_all(results: Sequence[Dict[str, float | str]], result_dir: Path) -> lis
     retrieval_path = result_dir / "ablation_retrieval_time_curve.png"
     plot_retrieval_time(results, retrieval_path)
     saved_paths.append(retrieval_path)
+    return saved_paths
+
+
+def plot_no_jl_main(results: Sequence[Dict[str, float | str | bool]], result_dir: Path) -> list[Path]:
+    """Render only the four decision-relevant No-JL ablation figures."""
+    result_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+    for metric_key, filename, title, ylabel, y_log, y_limit in NO_JL_PLOT_SPECS:
+        path = result_dir / filename
+        fig, ax = plt.subplots(figsize=(9.2, 5.6), dpi=160)
+        for scheme in _scheme_names(results):
+            scheme_results = _by_scheme(results, scheme)
+            x = np.asarray([float(item["utility_scale"]) for item in scheme_results])
+            y = np.asarray([float(item[metric_key]) for item in scheme_results])
+            if y_log:
+                y = np.maximum(y, 1e-12)
+            style = NO_JL_STYLES[scheme]
+            ax.plot(
+                x, y, label=scheme, color=style["color"], marker=style["marker"],
+                markersize=9, markeredgecolor="white", markeredgewidth=1.0,
+                linewidth=2.2, zorder=style["zorder"],
+            )
+        ax.set_title(title, pad=12)
+        ax.set_xlabel("Utility Scale")
+        ax.set_ylabel(ylabel)
+        ax.set_xscale("log")
+        if y_log:
+            ax.set_yscale("log")
+        if y_limit is not None:
+            ax.set_ylim(*y_limit)
+        ax.grid(True, which="both", linestyle="--", alpha=0.35)
+        ax.legend(loc="best", frameon=True, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+        saved_paths.append(path)
     return saved_paths
 
 
