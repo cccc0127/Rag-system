@@ -77,6 +77,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dcpe-beta", type=float, default=0.5)
     parser.add_argument("--dcpe-ratio-k", type=int, default=4)
     parser.add_argument("--dcpe-seed", type=int, default=42)
+    private_rag_rp_group = parser.add_mutually_exclusive_group()
+    private_rag_rp_group.add_argument(
+        "--enable-private-rag-rp",
+        dest="enable_private_rag_rp",
+        action="store_true",
+        help="Enable the Private RAG-RP random-projection baseline (default).",
+    )
+    private_rag_rp_group.add_argument(
+        "--disable-private-rag-rp",
+        dest="enable_private_rag_rp",
+        action="store_false",
+        help="Disable the Private RAG-RP random-projection baseline.",
+    )
+    parser.set_defaults(enable_private_rag_rp=True)
+    parser.add_argument("--private-rag-rp-dim", type=int, default=64)
+    parser.add_argument("--private-rag-rp-sigma", type=float, default=0.1)
+    parser.add_argument("--private-rag-rp-seed", type=int, default=42)
     parser.add_argument("--enable-ckks-fullscan", action="store_true")
     parser.add_argument("--enable-ckks-refine", action="store_true")
     parser.add_argument("--ckks-poly-modulus-degree", type=int, default=DEFAULT_CKKS_POLY_MODULUS_DEGREE)

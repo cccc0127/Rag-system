@@ -13,6 +13,7 @@ The current implementation provides several scheme adapters:
 Our DP-RAG-NoJL + HNSW
 Our DP-RAG-JL768 + HNSW
 Our DP-RAG-JL256 + HNSW
+Private RAG-RP + HNSW
 DCPE+DCE + HNSW filter-refine
 PartialHE-CKKS-FullScan
 HNSW+PartialHE-CKKS-Refine
@@ -40,6 +41,13 @@ raw 1024d embeddings
 -> dynamic analytic Gaussian DP noise
 -> final L2 normalization
 -> HNSW retrieval
+
+Private RAG-RP:
+raw 1024d embeddings
+-> row-wise L2 normalization (satisfies paper gamma=1, Delta=2 defaults)
+-> shared Gaussian random projection R, R_ij ~ N(0, 0.1^2), 1024d -> 64d
+-> no post-projection L2 normalization and no DP noise
+-> HNSW L2 retrieval
 
 DCPE+DCE:
 raw 1024d embeddings
@@ -120,6 +128,7 @@ By default, the runner evaluates:
 Our DP-RAG-NoJL
 Our DP-RAG-JL768
 Our DP-RAG-JL256
+Private RAG-RP
 DCPE+DCE
 ```
 
@@ -155,7 +164,25 @@ python3 comparison_experiments/comparison_runner.py \
 Run only Our DP-RAG variants:
 
 ```bash
-python3 comparison_experiments/comparison_runner.py --disable-dcpe-dce
+python3 comparison_experiments/comparison_runner.py \
+  --disable-private-rag-rp \
+  --disable-dcpe-dce
+```
+
+Disable the Private RAG-RP baseline:
+
+```bash
+python3 comparison_experiments/comparison_runner.py --disable-private-rag-rp
+```
+
+Use different Private RAG-RP projection parameters (the paper defaults are
+`k=64`, `sigma=0.1`, and seed `42`):
+
+```bash
+python3 comparison_experiments/comparison_runner.py \
+  --private-rag-rp-dim 128 \
+  --private-rag-rp-sigma 0.1 \
+  --private-rag-rp-seed 42
 ```
 
 Customize Our DP-RAG variants:
@@ -184,6 +211,9 @@ Default settings:
 - `ckks_coeff_mod_bit_sizes=60,40,40,60`
 - `ckks_global_scale=2**40`
 - `ckks_ratio_k=4`
+- `private_rag_rp_dim=64`
+- `private_rag_rp_sigma=0.1`
+- `private_rag_rp_seed=42`
 
 `ef_search` is the HNSW query-time candidate pool size. Larger values search
 more graph candidates and usually improve recall at the cost of more query
@@ -284,6 +314,23 @@ mechanism and differ only in the representation layer before clipping/noise:
 - `Our DP-RAG-JL768`: balanced compression mode.
 - `Our DP-RAG-JL256`: historical high-compression mode.
 
+`Private RAG-RP` is an empirical random-projection privacy baseline based on
+the ICLR 2025 Building Trust Workshop paper *Private Retrieval Augmented
+Generation with Random Projection*. It projects normalized document and query
+embeddings with one shared Gaussian matrix and performs L2 HNSW retrieval. It
+does not use this project's dynamic DP noise, sensitivity scoring, encryption,
+or filter-refine processing. The paper does not provide a directly comparable
+formal epsilon/delta calibration, so its `mean_epsilon`, `mean_sigma`, and NSR
+fields are intentionally `NaN`; its projection sigma is only the random-matrix
+scale. The fixed paper defaults are not included in `validation_tuner.py` or
+`recommended_params.json` selection.
+
+Current experiments compare retrieval utility, index build time, query time,
+vector dimension, and database-scale behavior only. Attack, sensitive-data
+leakage, membership-inference, and reconstruction evaluations are not yet
+implemented; therefore these experiments must not be used to claim an attack
+defense advantage for any scheme.
+
 `comparison_runner.py` uses concise output by default and prints only saved
 result paths. Pass `--verbose` to show context summaries, scheme reports,
 ef_search tables, and the Top-1 semantic alignment panel.
@@ -368,6 +415,21 @@ Interpretation:
   deployment balance.
 - If `DCPE+DCE` query time grows faster, the HNSW filter-refine cost is becoming
   visible at scale.
+
+## Private RAG-RP Projection-Dimension Sensitivity
+
+The main comparison keeps the paper-default Private RAG-RP setting at `k=64`.
+To measure how this baseline's projection dimension affects retrieval utility
+and runtime without changing any other experiment variable, run:
+
+```bash
+python3 comparison_experiments/private_rag_rp_sensitivity/runner.py
+```
+
+See `private_rag_rp_sensitivity/README.md` for the fixed variables, the
+default `k=64,128,256,512,768` sweep, and output locations. This is a
+performance sensitivity experiment only; it does not evaluate privacy attacks
+or leakage.
 
 ## Extension Rule
 
