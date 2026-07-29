@@ -6,7 +6,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 import numpy as np
 
@@ -32,6 +32,8 @@ class ComparisonContext:
     queries: List[str]
     query_embeddings: np.ndarray
     metadata: Dict[str, object]
+    additional_queries: List[str] | None = None
+    additional_query_embeddings: np.ndarray | None = None
 
 
 def add_context_args(parser: argparse.ArgumentParser) -> None:
@@ -49,7 +51,10 @@ def add_context_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def prepare_comparison_context(args: argparse.Namespace) -> ComparisonContext:
+def prepare_comparison_context(
+    args: argparse.Namespace,
+    additional_query_builder: Callable[[List[Dict[str, object]]], List[str]] | None = None,
+) -> ComparisonContext:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
     doc_counter = {"count": 0}
@@ -72,10 +77,14 @@ def prepare_comparison_context(args: argparse.Namespace) -> ComparisonContext:
     )
 
     queries = generate_random_queries(chunk_records, args.num_queries, args.query_seed)
-    query_embeddings = np.asarray(
-        model.encode(queries, batch_size=max(1, args.num_queries), show_progress_bar=False),
+    additional_queries = additional_query_builder(chunk_records) if additional_query_builder else []
+    all_queries = queries + additional_queries
+    all_query_embeddings = np.asarray(
+        model.encode(all_queries, batch_size=max(1, len(all_queries)), show_progress_bar=False),
         dtype=np.float32,
     )
+    query_embeddings = all_query_embeddings[: len(queries)]
+    additional_query_embeddings = all_query_embeddings[len(queries):] if additional_queries else None
 
     return ComparisonContext(
         chunk_records=chunk_records,
@@ -88,6 +97,9 @@ def prepare_comparison_context(args: argparse.Namespace) -> ComparisonContext:
             "sampled_chunks": len(chunk_records),
             "scanned_readable_documents": int(doc_counter["count"]),
             "num_queries": len(queries),
+            "num_additional_queries": len(additional_queries),
             "raw_embedding_dim": int(raw_embeddings.shape[1]),
         },
+        additional_queries=additional_queries,
+        additional_query_embeddings=additional_query_embeddings,
     )

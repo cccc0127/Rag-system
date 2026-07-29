@@ -431,6 +431,50 @@ default `k=64,128,256,512,768` sweep, and output locations. This is a
 performance sensitivity experiment only; it does not evaluate privacy attacks
 or leakage.
 
+## Security Experiments
+
+The first retrieval-layer security evaluation measures whether de-identified
+semantic attack queries retrieve chunks containing email addresses, URLs, or
+phone numbers. It is separate from the normal utility experiments and does not
+evaluate final LLM answer leakage:
+
+```bash
+python3 comparison_experiments/security_experiments/sensitive_retrieval/runner.py
+```
+
+See `security_experiments/sensitive_retrieval/README.md` for the threat model,
+metrics, and output boundaries.
+
+Known-candidate vector linkage is the second retrieval-layer security test:
+
+```bash
+python3 comparison_experiments/security_experiments/vector_linkage/runner.py
+```
+
+See `security_experiments/vector_linkage/README.md` for its white-box threat
+model and recovery metrics.
+
+The third retrieval-layer security test evaluates sensitive attribute inference
+from protected document vectors using a disjoint auxiliary-data classifier:
+
+```bash
+python3 comparison_experiments/security_experiments/attribute_inference/runner.py
+```
+
+See `security_experiments/attribute_inference/README.md` for the strict
+cross-validation threat model, ROC-AUC / TPR@1% FPR metrics, and the small
+sample low-FPR limitation.
+
+The fourth security test measures source-document-disjoint membership inference
+against protected document vectors:
+
+```bash
+python3 comparison_experiments/security_experiments/membership_inference/runner.py
+```
+
+See `security_experiments/membership_inference/README.md` for its shadow-data
+threat model, two attacks, bootstrap intervals, and low-FPR resolution limit.
+
 ## Extension Rule
 
 Do not force JL projection or DP noise into future baselines unless those steps
