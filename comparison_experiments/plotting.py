@@ -8,6 +8,20 @@ from typing import Dict, Sequence
 import matplotlib.pyplot as plt
 
 
+# Keep scheme identity stable across all ef_search figures.  Marker shapes and
+# line styles remain distinguishable when values overlap exactly.
+EF_SEARCH_STYLES = {
+    "Our DP-RAG-NoJL": {"color": "#147D82", "marker": "o", "linestyle": "-", "zorder": 6},
+    "Our DP-RAG-JL768": {"color": "#3465C5", "marker": "s", "linestyle": "--", "zorder": 5},
+    "Our DP-RAG-JL256": {"color": "#8B5AA3", "marker": "^", "linestyle": "-.", "zorder": 4},
+    "Private RAG-RP": {"color": "#C85A43", "marker": "*", "linestyle": ":", "zorder": 7},
+    "DCPE+DCE": {"color": "#7A8E33", "marker": "D", "linestyle": "--", "zorder": 3},
+}
+
+FALLBACK_COLORS = ["#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD"]
+FALLBACK_MARKERS = ["P", "X", "v", "<", ">"]
+
+
 def plot_comparison_figures(
     metrics: Sequence[Dict[str, float | int | str]],
     output_dir: Path,
@@ -536,11 +550,33 @@ def _plot_ef_search_curve(
         grouped.setdefault(str(item["scheme"]), []).append(item)
 
     fig, ax = plt.subplots(figsize=(10.2, 5.4), dpi=160)
-    for scheme, rows in grouped.items():
+    for scheme_index, (scheme, rows) in enumerate(grouped.items()):
         sorted_rows = sorted(rows, key=lambda row: float(row["ef_search"]))
         x_values = [float(row["ef_search"]) for row in sorted_rows]
         y_values = [float(row[value_key]) for row in sorted_rows]
-        ax.plot(x_values, y_values, marker="o", linewidth=2.0, label=scheme)
+        style = EF_SEARCH_STYLES.get(
+            scheme,
+            {
+                "color": FALLBACK_COLORS[scheme_index % len(FALLBACK_COLORS)],
+                "marker": FALLBACK_MARKERS[scheme_index % len(FALLBACK_MARKERS)],
+                "linestyle": "-",
+                "zorder": 2 + scheme_index,
+            },
+        )
+        ax.plot(
+            x_values,
+            y_values,
+            color=style["color"],
+            marker=style["marker"],
+            linestyle=style["linestyle"],
+            linewidth=2.2,
+            markersize=8,
+            markerfacecolor="white",
+            markeredgecolor=style["color"],
+            markeredgewidth=1.4,
+            zorder=style["zorder"],
+            label=scheme,
+        )
 
     ax.set_title(title)
     ax.set_xlabel("ef_search")
@@ -549,7 +585,7 @@ def _plot_ef_search_curve(
     if y_limit is not None:
         ax.set_ylim(*y_limit)
     ax.grid(True, which="both", linestyle="--", alpha=0.35)
-    ax.legend()
+    ax.legend(frameon=True, fontsize=8)
     fig.tight_layout()
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
